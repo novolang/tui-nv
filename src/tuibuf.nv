@@ -1,0 +1,296 @@
+// tuibuf.nv — the cell buffer, and the diff that turns two of them
+// into the smallest update.
+//
+// Every body here is a `todo()`; the signatures are the design.
+//
+// THE DAMAGE MODEL IS THE PACKAGE.  A terminal program that redraws
+// the whole screen every frame works, flickers, and saturates a slow
+// link.  The alternative every program reinvents is to remember what
+// it drew last time and send only what changed — and that is exactly
+// two buffers and a comparison.  `diff` is that comparison, and it is
+// the function this module exists for.
+//
+// NOTHING HERE WRITES TO A TERMINAL.  `patch_bytes` BUILDS bytes into
+// a `[u8]` the caller owns, using ansi-nv's writer, and the caller
+// writes them.  That distinction is not a technicality: it is what
+// lets a frame be rendered, diffed and asserted on with no terminal
+// anywhere, and it is what lets a caller batch a whole frame into one
+// write — which a screen update has to be, or a reader sees it tear.
+//
+// THE COORDINATES ARE ZERO-BASED HERE AND ONE-BASED IN ansi-nv, and
+// the conversion happens in exactly one place: `patch_bytes`, where a
+// patch's `x`, `y` becomes `seqwrite.cursor_to(out, y + 1, x + 1)`.
+// Written down here because a convention that lives in two packages
+// and is stated in neither is the convention that produces a screen
+// drawn one row too high.
+//
+// A WIDE CHARACTER OCCUPIES TWO CELLS, and the second one is a
+// continuation: `glyph` 0 and `width` 0.  A renderer that skipped it
+// would leave whatever was there before showing through the right half
+// of a CJK ideograph, and a diff that did not know about it would emit
+// the second cell as a change every frame.
+
+use sgr
+use seqwrite
+use widths
+use tuiarea
+
+// TuiCell is one cell of the screen.
+//
+// A struct rather than a packed integer, and that is a deliberate
+// trade: novo-vte packs the same information into two 64-bit words
+// because it holds a hundred thousand cells and pays for the packing
+// in every accessor.  A published interface pays instead in the field
+// names, which are the documentation, and a consumer that needs the
+// packing writes it over this.
+pub struct TuiCell
+    // The codepoint shown, or 0 for the continuation half of a wide
+    // character and for a blank.
+    glyph: Int
+    // How many cells the glyph occupies: 1 usually, 2 for a wide
+    // character, 0 for the continuation cell that follows one.
+    width: Int
+    style: sgr.SgrAttrs
+
+// TuiBuffer is a rectangle of cells.
+//
+// It carries its own area rather than only its size, so that a buffer
+// for part of the screen — a popup, a pane — knows where it is and a
+// diff against the last frame does not need the caller to remember.
+pub struct TuiBuffer
+    area: tuiarea.TuiRect
+    // Row-major, `area.width * area.height` entries.  Flat rather than
+    // a list of rows because every operation here is an index
+    // calculation and a nested list is an allocation per row.
+    cells: [TuiCell]
+
+// TuiPatch is one cell that changed, and what it changed to.
+//
+// Absolute coordinates rather than an offset into a buffer, so that a
+// caller can concatenate the patches from several buffers — a screen
+// built from panes — and hand the lot to `patch_bytes` in one go.
+pub struct TuiPatch
+    x: Int
+    y: Int
+    cell: TuiCell
+
+// TuiFlush is what `patch_bytes` hands back: the bytes, and the style
+// the terminal has been left in.
+//
+// The style is the half a caller forgets and the reason this is a
+// struct.  A frame's bytes end with the terminal in whatever attribute
+// state the last patch needed; the next frame's `patch_bytes` has to
+// start from that state or it emits a redundant reset per run, and
+// there is no way to ask a terminal what state it is in.
+pub struct TuiFlush
+    bytes: [u8]
+    style: sgr.SgrAttrs
+
+// blank_cell is an empty cell with the terminal's own colours.
+pub fn blank_cell() -> TuiCell
+    todo("tui-nv.tuibuf.blank_cell")
+
+// cell_of is a cell from a codepoint and a style, with the width taken
+// from the rule.
+//
+// The width rule is a parameter for the same reason it is one in
+// textwrap-nv: how many columns a codepoint occupies is a Unicode
+// table nobody has written yet, and a package that guessed would have
+// to break its callers to stop guessing.
+pub fn cell_of(glyph: Int, style: sgr.SgrAttrs, w: widths.WrapWidth) -> TuiCell
+    todo("tui-nv.tuibuf.cell_of")
+
+// continuation_cell is the second half of a wide character.
+//
+// `glyph` 0 and `width` 0, carrying the same style as its first half
+// so that a background colour runs across both halves rather than
+// stopping in the middle of the character.
+pub fn continuation_cell(style: sgr.SgrAttrs) -> TuiCell
+    todo("tui-nv.tuibuf.continuation_cell")
+
+// cell_eq says whether two cells would render identically.
+//
+// What `diff` is written in terms of, and `pub` because a caller with
+// its own comparison — a test asserting a region is unchanged — needs
+// the same answer rather than a field-by-field one that disagrees
+// about a style nobody can see.
+pub fn cell_eq(a: TuiCell, b: TuiCell) -> Bool
+    todo("tui-nv.tuibuf.cell_eq")
+
+// buffer_new is a buffer of blank cells covering an area.
+pub fn buffer_new(area: tuiarea.TuiRect) -> TuiBuffer
+    todo("tui-nv.tuibuf.buffer_new")
+
+// buffer_filled is a buffer of one repeated cell.
+//
+// For a background: a pane with a colour of its own starts here rather
+// than blanking and then setting every cell.
+pub fn buffer_filled(area: tuiarea.TuiRect, c: TuiCell) -> TuiBuffer
+    todo("tui-nv.tuibuf.buffer_filled")
+
+// buffer_get is the cell at an absolute position, or `None` outside
+// the buffer's area.
+//
+// Absolute rather than relative to the buffer's own origin, because
+// every caller has a `TuiRect` in screen coordinates and translating
+// at every call is where an off-by-one gets in.
+pub fn buffer_get(b: TuiBuffer, x: Int, y: Int) -> ?TuiCell
+    todo("tui-nv.tuibuf.buffer_get")
+
+// buffer_set writes one cell, and does nothing outside the area.
+//
+// Silently, on purpose: a widget that drew one cell past its area
+// should produce a slightly wrong picture rather than a panic, because
+// the alternative is that every widget in the package carries a bounds
+// check the buffer already has.
+pub fn buffer_set(b: TuiBuffer, x: Int, y: Int, c: TuiCell) -> TuiBuffer
+    todo("tui-nv.tuibuf.buffer_set")
+
+// buffer_set_str writes a string starting at a position, clipped to
+// the area, and returns the buffer and the column it stopped at.
+//
+// The width rule decides how many cells each codepoint takes, and a
+// wide character that would straddle the right edge is left out
+// entirely rather than half-drawn.
+pub fn buffer_set_str(b: TuiBuffer, x: Int, y: Int, text: Str, style: sgr.SgrAttrs,
+                      w: widths.WrapWidth) -> TuiWrite
+    todo("tui-nv.tuibuf.buffer_set_str")
+
+// TuiWrite is a buffer and the column a write stopped at.
+//
+// The column is what a caller drawing several styled runs on one line
+// needs — where the next one starts — and computing it again from the
+// text's width would be measuring the string twice.
+pub struct TuiWrite
+    buffer: TuiBuffer
+    // The column after the last cell written, in absolute
+    // coordinates.
+    next_x: Int
+
+// buffer_fill sets every cell of a region to one cell.
+pub fn buffer_fill(b: TuiBuffer, area: tuiarea.TuiRect, c: TuiCell) -> TuiBuffer
+    todo("tui-nv.tuibuf.buffer_fill")
+
+// buffer_clear blanks the whole buffer.
+pub fn buffer_clear(b: TuiBuffer) -> TuiBuffer
+    todo("tui-nv.tuibuf.buffer_clear")
+
+// buffer_style_region applies a style to a region without changing its
+// glyphs.
+//
+// What a selection highlight is, and what an inverted status bar is:
+// the text is already drawn and only the attributes change.
+pub fn buffer_style_region(b: TuiBuffer, area: tuiarea.TuiRect, style: sgr.SgrAttrs) -> TuiBuffer
+    todo("tui-nv.tuibuf.buffer_style_region")
+
+// buffer_resize is a buffer over a new area, keeping the cells that
+// are in both.
+//
+// What a terminal resize needs.  Keeping the overlap rather than
+// blanking is what makes the frame after a resize a small diff instead
+// of a whole screen.
+pub fn buffer_resize(b: TuiBuffer, area: tuiarea.TuiRect) -> TuiBuffer
+    todo("tui-nv.tuibuf.buffer_resize")
+
+// buffer_merge draws one buffer over another, at the smaller one's own
+// position.
+//
+// How a screen is built from panes, and how a popup goes on top: each
+// piece renders into a buffer of its own area, and the pieces are
+// merged in the order they should be layered.
+pub fn buffer_merge(under: TuiBuffer, over: TuiBuffer) -> TuiBuffer
+    todo("tui-nv.tuibuf.buffer_merge")
+
+// diff is every cell that differs between two buffers.
+//
+// THE FUNCTION THIS MODULE EXISTS FOR.  In screen order — row by row,
+// left to right — because a caller turning patches into bytes emits a
+// cursor move only when the next patch is not where the last one left
+// the cursor, and screen order is what makes that true most of the
+// time.
+//
+// Two buffers of different areas diff over their intersection, and
+// every cell of `next` outside `prev` is a patch: a buffer that grew
+// has new cells, and they have never been drawn.
+//
+// ```novo
+// use tuibuf
+//
+// fn main() [io]
+//     let prev = tuibuf.buffer_new(tuiarea.rect(0, 0, 80, 24))
+//     let next = prev
+//     // Nothing changed, so nothing is sent — which is the property
+//     // the whole model rests on.
+//     println(str.from_int(list.len(tuibuf.diff(prev, next))))     // 0
+// ```
+pub fn diff(prev: TuiBuffer, next: TuiBuffer) -> [TuiPatch]
+    todo("tui-nv.tuibuf.diff")
+
+// diff_region is `diff` restricted to a rectangle.
+//
+// For a caller that knows only one pane changed and does not want to
+// walk the other twenty-three rows to find out.
+pub fn diff_region(prev: TuiBuffer, next: TuiBuffer, area: tuiarea.TuiRect) -> [TuiPatch]
+    todo("tui-nv.tuibuf.diff_region")
+
+// damage_rect is the smallest rectangle covering every patch, or an
+// empty rectangle for none.
+//
+// A coarser answer than the patch list, and cheaper to act on when
+// almost everything changed — a caller may decide to redraw the
+// rectangle rather than emit ten thousand cursor moves.
+pub fn damage_rect(patches: [TuiPatch]) -> tuiarea.TuiRect
+    todo("tui-nv.tuibuf.damage_rect")
+
+// patch_bytes builds the escape sequences for a list of patches into
+// the caller's buffer.
+//
+// IT WRITES NOTHING.  `out` goes in, `out` comes back inside a
+// `TuiFlush`, and the caller writes the bytes — once, which is what
+// stops a screen update from tearing.  This is the only function in
+// tui-nv that knows an escape sequence exists, and it knows because
+// ansi-nv's writer is doing the work: a cursor move when the next
+// patch is not adjacent to the last, `seqwrite.sgr_change` when the
+// style differs from the one the terminal is in, and the glyph.
+//
+// `from` is the style the terminal is already in — the `style` of the
+// previous frame's `TuiFlush`, or `sgr.attrs_default()` after a reset.
+// Getting it right is the difference between one `CSI m` per run of
+// cells and one per cell.
+//
+// ```novo
+// use sgr
+// use tuiarea
+// use tuibuf
+//
+// fn main() [io]
+//     let area = tuiarea.rect(0, 0, 80, 24)
+//     let previous = tuibuf.buffer_new(area)
+//     let current = tuibuf.buffer_clear(previous)
+//     let flush = tuibuf.patch_bytes([], tuibuf.diff(previous, current),
+//                                    sgr.attrs_default())
+//     // `flush.bytes` is one write, and `flush.style` is what the
+//     // next frame starts from.
+//     println(str.from_int(list.len(flush.bytes)))
+// ```
+pub fn patch_bytes(out: [u8], patches: [TuiPatch], from: sgr.SgrAttrs) -> TuiFlush
+    todo("tui-nv.tuibuf.patch_bytes")
+
+// buffer_bytes builds the whole buffer, unconditionally.
+//
+// The first frame, and the frame after a resize or a `SIGCONT` where
+// what the terminal is showing is unknown.  It is `patch_bytes` over
+// every cell, and having it as a function rather than as advice is
+// what stops a program from keeping a fake empty buffer around to diff
+// the first frame against.
+pub fn buffer_bytes(out: [u8], b: TuiBuffer, from: sgr.SgrAttrs) -> TuiFlush
+    todo("tui-nv.tuibuf.buffer_bytes")
+
+// buffer_text is the buffer's glyphs as lines of text, styles
+// discarded.
+//
+// For a test, and for a program that wants to copy the screen.  It is
+// what makes a widget's output assertable without a terminal, which is
+// most of what the `core` layer buys here.
+pub fn buffer_text(b: TuiBuffer) -> [Str]
+    todo("tui-nv.tuibuf.buffer_text")

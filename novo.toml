@@ -1,0 +1,53 @@
+[package]
+name        = "tui-nv"
+version     = "0.0.1"
+description = "Layout, widgets and the damage model for a terminal user interface, with the writer belonging to the caller: a constraint solver over rectangles, a cell buffer, a diff of two buffers into the smallest set of changes, and the widgets a real program needs — block, paragraph, list, table, gauge, tabs, scrollbar.  Nothing here writes to a terminal.  Interface only — every body is a todo()."
+license     = "Apache-2.0"
+
+# An INTERFACE release: every `pub fn` body is a `todo()`, so the
+# signatures and the effect rows are published and nothing is
+# implemented.  `novo pkg publish` recognises the shape and requires
+# both the draft stability and the 0.0.x version; the first
+# implementation is the 0.1.0 published over it.
+stability   = "draft"
+
+# `core`.  A widget renders into a buffer, the buffer diffs against the
+# last one, and the diff becomes bytes in a list the caller owns and
+# writes — so the whole of the drawing is a pure function and the one
+# effect in the loop is the caller's single write.  That is also what
+# makes a frame testable: render it, diff it, and assert on the bytes,
+# with no terminal anywhere.
+layer       = "core"
+
+category    = "terminal"
+
+tags        = ["tui", "terminal", "widgets", "layout", "ratatui", "damage", "diff", "cell-buffer", "sans-io"]
+repository  = "https://github.com/novolang/tui-nv"
+maintainers = ["novo-lang"]
+novo        = ">= 0.8.9"
+
+# A library: no `main`, so `novo pkg build` type-checks and
+# effect-checks every module under `src/` and writes no binary.
+
+[docs.pages]
+"README.md" = "Layout, widgets and the damage model"
+
+[dependencies]
+# BOTH ARE PATH DEPENDENCIES ON SIBLINGS IN THIS LANE, and the
+# coordinator converts each to `^0.0.1` at publish — a path dependency
+# is refused by `novo pkg publish`, which is the rule that keeps a
+# published tarball from sending every consumer to a directory on
+# somebody else's machine.
+#
+# ansi-nv, for the STYLE MODEL and nothing else.  A `TuiCell` carries
+# an `SgrAttrs`, so the diff a caller hands to `seqwrite.sgr_change`
+# needs no conversion — and a second colour model here would mean
+# translating every changed cell at the boundary, in the one loop where
+# the cost is per cell.  `core`, so `dep-layer` holds.
+ansi-nv = "^0.0.1"
+
+# textwrap-nv, for the paragraph widget.  Wrapping at a display width
+# is the whole of what a paragraph does that a `buffer_set_str` does
+# not, and `wrapped_height` is what a layout asks before it decides how
+# tall to make one.  `core`, so `dep-layer` holds.
+textwrap-nv = "^0.0.1"

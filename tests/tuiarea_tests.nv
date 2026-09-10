@@ -1,0 +1,277 @@
+// tuiarea_tests.nv — the API suite for the geometry and the
+// constraint solver.
+//
+// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
+// assertion here reaches `not implemented: tui-nv.tuiarea.<fn>`.  Run
+// with `--isolate` for one verdict per `@test`.
+//
+// THE CASES THAT MATTER are the ones about the leftover cell.  A
+// layout that does not add up to the rectangle it was given is a
+// layout whose screen shifts by one as a window is resized, and it is
+// the bug every hand-rolled terminal layout has — so almost every case
+// here asserts the total as well as the pieces.
+
+use std.test
+use std.list
+use tuiarea
+
+@test
+fn test_a_rectangle_is_four_numbers_and_two_edges() [io]
+    let r = tuiarea.rect(2, 3, 10, 5)
+
+    test.case("the edges are exclusive, so right is x plus width")
+    test.assert(tuiarea.rect_right(r) == 12)
+    test.assert(tuiarea.rect_bottom(r) == 8)
+
+    test.case("and the area is the product")
+    test.assert(tuiarea.rect_area(r) == 50)
+    test.assert(tuiarea.rect_is_empty(r) == false)
+
+@test
+fn test_a_negative_size_is_clamped_rather_than_believed() [io]
+    // So that every rectangle this package produces is one an index
+    // loop can walk without a guard.
+    let r = tuiarea.rect(0, 0, 0 - 4, 5)
+
+    test.case("no rectangle is narrower than nothing")
+    test.assert(r.width == 0)
+    test.assert(tuiarea.rect_is_empty(r))
+
+    test.case("and the empty rectangle is empty")
+    test.assert(tuiarea.rect_area(tuiarea.rect_empty()) == 0)
+
+@test
+fn test_containment_and_intersection_answer_the_mouse_question() [io]
+    let a = tuiarea.rect(0, 0, 10, 10)
+    let b = tuiarea.rect(5, 5, 10, 10)
+
+    test.case("a cell inside")
+    test.assert(tuiarea.rect_contains(a, 0, 0))
+    test.assert(tuiarea.rect_contains(a, 9, 9))
+
+    test.case("and one on the exclusive edge, which is outside")
+    test.assert(tuiarea.rect_contains(a, 10, 0) == false)
+
+    test.case("two overlapping rectangles share cells")
+    test.assert(tuiarea.rect_intersects(a, b))
+    let shared = tuiarea.rect_intersection(a, b)
+    test.assert(shared.x == 5)
+    test.assert(shared.width == 5)
+
+    test.case("and two that do not share nothing")
+    let far = tuiarea.rect(50, 50, 2, 2)
+    test.assert(tuiarea.rect_intersects(a, far) == false)
+    test.assert(tuiarea.rect_is_empty(tuiarea.rect_intersection(a, far)))
+
+@test
+fn test_the_union_is_the_smallest_rectangle_holding_both() [io]
+    let u = tuiarea.rect_union(tuiarea.rect(0, 0, 2, 2), tuiarea.rect(8, 8, 2, 2))
+
+    test.case("it reaches from one corner to the other")
+    test.assert(u.x == 0)
+    test.assert(u.y == 0)
+    test.assert(tuiarea.rect_right(u) == 10)
+    test.assert(tuiarea.rect_bottom(u) == 10)
+
+@test
+fn test_a_margin_larger_than_the_rectangle_leaves_nothing() [io]
+    // Rather than a rectangle that wraps around, which is what a
+    // subtraction without a clamp produces.
+    let inner = tuiarea.rect_inner(tuiarea.rect(0, 0, 4, 4),
+                                   TuiMargin { horizontal: 9, vertical: 9 })
+
+    test.case("nothing to draw in")
+    test.assert(tuiarea.rect_is_empty(inner))
+
+    test.case("while an ordinary margin takes one off each side")
+    let ok = tuiarea.rect_inner(tuiarea.rect(0, 0, 10, 10),
+                                TuiMargin { horizontal: 1, vertical: 2 })
+    test.assert(ok.x == 1)
+    test.assert(ok.width == 8)
+    test.assert(ok.y == 2)
+    test.assert(ok.height == 6)
+
+@test
+fn test_a_popup_that_would_hang_off_the_edge_is_moved() [io]
+    // The one case where the right answer is to move it rather than to
+    // clip it.
+    let screen = tuiarea.rect(0, 0, 80, 24)
+    let moved = tuiarea.rect_clamp(tuiarea.rect(75, 20, 20, 10), screen)
+
+    test.case("it ends up inside")
+    test.assert(tuiarea.rect_right(moved) <= 80)
+    test.assert(tuiarea.rect_bottom(moved) <= 24)
+
+@test
+fn test_centring_rounds_towards_the_top_left() [io]
+    // The convention every terminal program has converged on, and the
+    // arithmetic every program writes once and gets wrong on an odd
+    // number of columns.
+    let c = tuiarea.centred(4, 2, tuiarea.rect(0, 0, 9, 5))
+
+    test.case("half of the five leftover columns, rounded down")
+    test.assert(c.x == 2)
+    test.assert(c.y == 1)
+    test.assert(c.width == 4)
+    test.assert(c.height == 2)
+
+@test
+fn test_a_vertical_split_divides_the_height() [io]
+    let rows = tuiarea.split(tuiarea.rect(0, 0, 80, 24),
+                             tuiarea.layout(TuiVertical,
+                                            [TuiFixed(1), TuiFill(1), TuiFixed(1)]))
+
+    test.case("one rectangle per constraint, in order")
+    test.assert(list.len(rows) == 3)
+
+    test.case("the fixed pieces got what they asked for")
+    test.assert(list.get(rows, 0).height == 1)
+    test.assert(list.get(rows, 2).height == 1)
+
+    test.case("the fill got the rest")
+    test.assert(list.get(rows, 1).height == 22)
+
+    test.case("and every piece is the full width")
+    for r in rows
+        test.assert(r.width == 80)
+
+@test
+fn test_the_pieces_always_add_up_to_the_rectangle() [io]
+    // The property that stops a screen from shifting by a cell as a
+    // window is resized: step 5 of the solver's order.
+    let spec = tuiarea.layout(TuiHorizontal,
+                              [TuiFill(1), TuiFill(1), TuiFill(1)])
+
+    test.case("three equal fills over a width that does not divide by three")
+    let cols = tuiarea.split(tuiarea.rect(0, 0, 80, 24), spec)
+    var total = 0
+    for c in cols
+        total = total + c.width
+    test.assert(total == 80)
+
+    test.case("and the pieces are contiguous, with no gap and no overlap")
+    test.assert(list.get(cols, 0).x == 0)
+    test.assert(list.get(cols, 1).x == tuiarea.rect_right(list.get(cols, 0)))
+    test.assert(list.get(cols, 2).x == tuiarea.rect_right(list.get(cols, 1)))
+
+@test
+fn test_a_ratio_is_not_a_percentage() [io]
+    // A third is not 33 percent, and three of them are not 99.
+    let thirds = tuiarea.split(tuiarea.rect(0, 0, 90, 10),
+                               tuiarea.layout(TuiHorizontal,
+                                              [TuiRatio(1, 3), TuiRatio(1, 3),
+                                               TuiRatio(1, 3)]))
+    var total = 0
+    for c in thirds
+        total = total + c.width
+
+    test.case("three thirds are the whole")
+    test.assert(total == 90)
+
+@test
+fn test_a_percentage_rounds_down_and_a_fill_takes_the_remainder() [io]
+    let cols = tuiarea.split(tuiarea.rect(0, 0, 100, 10),
+                             tuiarea.layout(TuiHorizontal,
+                                            [TuiPercentage(30), TuiFill(1)]))
+
+    test.case("thirty percent of a hundred")
+    test.assert(list.get(cols, 0).width == 30)
+
+    test.case("and the rest")
+    test.assert(list.get(cols, 1).width == 70)
+
+@test
+fn test_a_minimum_is_satisfied_before_a_fill_takes_anything() [io]
+    let cols = tuiarea.split(tuiarea.rect(0, 0, 20, 10),
+                             tuiarea.layout(TuiHorizontal,
+                                            [TuiFill(1), TuiMinimum(15)]))
+
+    test.case("the minimum got its cells")
+    test.assert(list.get(cols, 1).width >= 15)
+
+    test.case("and the fill got what was left, even though it was little")
+    test.assert(list.get(cols, 0).width + list.get(cols, 1).width == 20)
+
+@test
+fn test_a_maximum_gives_back_what_it_does_not_need() [io]
+    let cols = tuiarea.split(tuiarea.rect(0, 0, 100, 10),
+                             tuiarea.layout(TuiHorizontal,
+                                            [TuiMaximum(20), TuiFill(1)]))
+
+    test.case("it took no more than its maximum")
+    test.assert(list.get(cols, 0).width <= 20)
+
+    test.case("and the fill took the rest")
+    test.assert(list.get(cols, 0).width + list.get(cols, 1).width == 100)
+
+@test
+fn test_spacing_and_margin_come_off_before_the_constraints() [io]
+    // So that a spacing that does not fit shrinks the pieces rather
+    // than overflowing the rectangle.
+    let spec = TuiLayoutSpec { direction: TuiHorizontal,
+                               margin: TuiMargin { horizontal: 1, vertical: 0 },
+                               spacing: 2,
+                               constraints: [TuiFill(1), TuiFill(1)] }
+    let cols = tuiarea.split(tuiarea.rect(0, 0, 20, 10), spec)
+
+    test.case("the pieces start inside the margin")
+    test.assert(list.get(cols, 0).x == 1)
+
+    test.case("with the spacing between them")
+    test.assert(list.get(cols, 1).x == tuiarea.rect_right(list.get(cols, 0)) + 2)
+
+    test.case("and nothing runs past the margin on the other side")
+    test.assert(tuiarea.rect_right(list.get(cols, 1)) <= 19)
+
+@test
+fn test_a_constraint_with_no_room_gets_an_empty_rectangle() [io]
+    // Rather than a shorter list, so that a caller may index the
+    // result against the constraints it passed in.
+    let cols = tuiarea.split(tuiarea.rect(0, 0, 3, 10),
+                             tuiarea.layout(TuiHorizontal,
+                                            [TuiFixed(3), TuiFixed(5)]))
+
+    test.case("one rectangle per constraint, still")
+    test.assert(list.len(cols) == 2)
+
+    test.case("and the one there was no room for is empty")
+    test.assert(tuiarea.rect_is_empty(list.get(cols, 1)))
+
+@test
+fn test_the_one_line_split_needs_no_constraint_list() [io]
+    let parts = tuiarea.split_at(tuiarea.rect(0, 0, 80, 24), TuiVertical, 3)
+
+    test.case("two pieces")
+    test.assert(list.len(parts) == 2)
+
+    test.case("the first as deep as asked")
+    test.assert(list.get(parts, 0).height == 3)
+
+    test.case("and the second the rest")
+    test.assert(list.get(parts, 1).height == 21)
+
+@test
+fn test_a_layout_can_be_refused_before_it_is_drawn() [io]
+    // For a program that would rather say "the window is too small"
+    // than draw something illegible.
+    let spec = tuiarea.layout(TuiVertical,
+                              [TuiFixed(1), TuiMinimum(10), TuiFixed(1)])
+
+    test.case("each constraint's floor")
+    test.assert(tuiarea.constraint_min(TuiFixed(4)) == 4)
+    test.assert(tuiarea.constraint_min(TuiMinimum(10)) == 10)
+    test.assert(tuiarea.constraint_min(TuiFill(1)) == 0)
+    test.assert(tuiarea.constraint_min(TuiMaximum(10)) == 0)
+    test.assert(tuiarea.constraint_min(TuiPercentage(50)) == 0)
+    test.assert(tuiarea.constraint_min(TuiRatio(1, 2)) == 0)
+
+    test.case("and the whole spec's, which is what a program checks")
+    test.assert(tuiarea.spec_min(spec) == 12)
+
+@test
+fn test_a_margin_of_nothing_is_a_value() [io]
+    let m = tuiarea.no_margin()
+
+    test.case("both axes")
+    test.assert(m.horizontal == 0)
+    test.assert(m.vertical == 0)

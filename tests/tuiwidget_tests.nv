@@ -1,0 +1,331 @@
+// tuiwidget_tests.nv — the API suite for the widget set.
+//
+// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
+// assertion here reaches `not implemented: tui-nv.tuiwidget.<fn>`.
+// Run with `--isolate` for one verdict per `@test`.
+//
+// EVERY CASE HERE RENDERS AND THEN READS THE BUFFER BACK, which is the
+// property the `core` layer buys: a widget is a pure function into a
+// cell buffer, so what it drew can be asserted with no terminal
+// anywhere and no escape sequence in sight.
+//
+// The cases about the hit-testing functions — `list_item_at`,
+// `tab_at`, `scrollbar_position_at` — are the ones a reader should
+// look at first.  They are the half of a widget set that gets left
+// out, and leaving it out is why every terminal program has its own
+// wrong arithmetic for "which row did the user click".
+
+use std.test
+use std.list
+use sgr
+use widths
+use wrapping
+use tuiarea
+use tuibuf
+use tuiwidget
+
+fn area() -> tuiarea.TuiRect
+    tuiarea.rect(0, 0, 20, 6)
+
+fn mono() -> widths.WrapWidth
+    widths.monospace_width()
+
+fn blank() -> tuibuf.TuiBuffer
+    tuibuf.buffer_new(area())
+
+@test
+fn test_a_block_costs_a_cell_on_every_bordered_side() [io]
+    let b = tuiwidget.default_block()
+    let inner = tuiwidget.block_inner(b, area())
+
+    test.case("all four sides are drawn by default")
+    test.assert(b.sides.top)
+    test.assert(b.sides.right)
+
+    test.case("so the inside is two cells narrower and two shorter")
+    test.assert(inner.width == 18)
+    test.assert(inner.height == 4)
+    test.assert(inner.x == 1)
+    test.assert(inner.y == 1)
+
+@test
+fn test_a_block_with_no_sides_costs_nothing() [io]
+    var b = tuiwidget.default_block()
+    b.sides = tuiwidget.no_sides()
+
+    test.case("the inside is the whole area")
+    let inner = tuiwidget.block_inner(b, area())
+    test.assert(inner.width == 20)
+    test.assert(inner.height == 6)
+
+    test.case("and all_sides is the other extreme")
+    let all = tuiwidget.all_sides()
+    test.assert(all.top and all.bottom and all.left and all.right)
+
+@test
+fn test_a_block_draws_its_border_and_its_title() [io]
+    let b = tuiwidget.titled_block(" logs ")
+    let drawn = tuiwidget.render_block(blank(), area(), b)
+
+    test.case("the top left corner is drawn")
+    match tuibuf.buffer_get(drawn, 0, 0)
+        Some(c) => test.assert(c.glyph == tuiwidget.border_glyph(TuiPlainBorder,
+                                                                 TuiBorderTopLeft))
+        None    => test.assert(false)
+
+    test.case("and the title is in the top edge")
+    let lines = tuibuf.buffer_text(drawn)
+    test.assert(list.len(lines) == 6)
+
+@test
+fn test_the_ascii_border_has_no_box_drawing_characters() [io]
+    // For a terminal or a font that has none, which is still a real
+    // case over a serial console.
+    test.case("the corners are plus signs")
+    test.assert(tuiwidget.border_glyph(TuiAsciiBorder, TuiBorderTopLeft) == 0x2B)
+
+    test.case("the horizontals are hyphens and the verticals are bars")
+    test.assert(tuiwidget.border_glyph(TuiAsciiBorder, TuiBorderTop) == 0x2D)
+    test.assert(tuiwidget.border_glyph(TuiAsciiBorder, TuiBorderLeft) == 0x7C)
+
+    test.case("while the plain border uses the box-drawing set")
+    test.assert(tuiwidget.border_glyph(TuiPlainBorder, TuiBorderTop) == 0x2500)
+
+@test
+fn test_a_paragraph_clips_when_it_is_not_asked_to_wrap() [io]
+    // Which is what a log line wants: wrapping a log makes the rows
+    // stop lining up with anything.
+    var p = tuiwidget.default_paragraph("a line far longer than twenty columns")
+
+    test.case("no wrap options by default")
+    match p.wrap
+        Some(_) => test.assert(false)
+        None    => test.assert(true)
+
+    test.case("so one input line is one output row")
+    test.assert(tuiwidget.paragraph_height(p, 20, mono()) == 1)
+
+@test
+fn test_a_paragraph_that_wraps_reports_its_height_before_it_is_drawn() [io]
+    // What a layout asks before it decides how tall to make one.
+    var p = tuiwidget.default_paragraph("the quick brown fox jumps over the lazy dog")
+    p.wrap = Some(wrapping.default_options())
+
+    test.case("more rows than one")
+    test.assert(tuiwidget.paragraph_height(p, 20, mono()) > 1)
+
+    test.case("and the drawing agrees with the answer")
+    let drawn = tuiwidget.render_paragraph(blank(), area(), p, mono())
+    var used = 0
+    for line in tuibuf.buffer_text(drawn)
+        if line != "                    "
+            used = used + 1
+    test.assert(used == tuiwidget.paragraph_height(p, 20, mono()))
+
+@test
+fn test_a_list_draws_from_its_offset() [io]
+    var l = tuiwidget.default_list(["one", "two", "three", "four", "five", "six",
+                                    "seven", "eight"])
+    l.offset = 3
+
+    let lines = tuibuf.buffer_text(tuiwidget.render_list(blank(), area(), l, mono()))
+
+    test.case("the first row is the item at the offset")
+    test.assert(list.get(lines, 0) == "four                ")
+
+@test
+fn test_a_list_keeps_its_selection_visible_without_moving_it() [io]
+    // The scroll arithmetic is a function the PROGRAM calls, so that
+    // scrolling with a mouse and moving with the arrows do not fight.
+    var l = tuiwidget.default_list(["one", "two", "three", "four", "five", "six",
+                                    "seven", "eight"])
+    l.offset = 0
+    l.selected = Some(7)
+
+    test.case("a selection below the window scrolls to it")
+    test.assert(tuiwidget.list_offset_for(l, 4) == 4)
+
+    test.case("a selection already visible leaves the offset alone")
+    l.selected = Some(1)
+    l.offset = 0
+    test.assert(tuiwidget.list_offset_for(l, 4) == 0)
+
+    test.case("and nothing selected changes nothing")
+    l.selected = None
+    l.offset = 2
+    test.assert(tuiwidget.list_offset_for(l, 4) == 2)
+
+@test
+fn test_a_click_on_a_list_names_an_item() [io]
+    var l = tuiwidget.default_list(["one", "two", "three"])
+    l.offset = 1
+
+    test.case("the first row is the item at the offset")
+    match tuiwidget.list_item_at(l, area(), 0)
+        Some(i) => test.assert(i == 1)
+        None    => test.assert(false)
+
+    test.case("a row past the last item names nothing")
+    match tuiwidget.list_item_at(l, area(), 5)
+        Some(_) => test.assert(false)
+        None    => test.assert(true)
+
+@test
+fn test_a_tables_columns_are_solved_the_way_the_screen_is() [io]
+    // Same constraints, same solver, so a column may be fixed, a
+    // percentage, or fill whatever is left.
+    let t = tuiwidget.default_table([tuiwidget.table_row(["a", "b"])],
+                                    [TuiFixed(5), TuiFill(1)])
+    let cols = tuiwidget.table_columns(t, area())
+
+    test.case("one rectangle per column")
+    test.assert(list.len(cols) == 2)
+
+    test.case("the fixed one got what it asked for")
+    test.assert(list.get(cols, 0).width == 5)
+
+    test.case("and the columns add up to the table")
+    test.assert(list.get(cols, 0).width + list.get(cols, 1).width == 20)
+
+@test
+fn test_a_table_draws_its_header_and_then_its_rows() [io]
+    var t = tuiwidget.default_table([tuiwidget.table_row(["r1c1", "r1c2"]),
+                                     tuiwidget.table_row(["r2c1", "r2c2"])],
+                                    [TuiFill(1), TuiFill(1)])
+    t.header = ["h1", "h2"]
+
+    let lines = tuibuf.buffer_text(tuiwidget.render_table(blank(), area(), t, mono()))
+
+    test.case("the header is the first row")
+    test.assert(list.get(lines, 0) != "                    ")
+
+    test.case("and the rows follow it")
+    test.assert(list.get(lines, 1) != "                    ")
+
+@test
+fn test_a_gauge_clamps_a_ratio_outside_the_range() [io]
+    // A gauge that drew past its area on a ratio of 1.2 is a gauge
+    // that corrupts whatever is beside it.
+    var g = tuiwidget.default_gauge(1.5)
+    let drawn = tuiwidget.render_gauge(blank(), area(), g, mono())
+
+    test.case("nothing was drawn outside the area")
+    test.assert(list.len(drawn.cells) == 120)
+
+    test.case("and the default gauge labels itself with its percentage")
+    match tuiwidget.default_gauge(0.5).label
+        Some(_) => test.assert(false)
+        None    => test.assert(true)
+
+@test
+fn test_a_tab_row_is_hit_testable() [io]
+    let t = tuiwidget.default_tabs(["alpha", "beta"])
+
+    test.case("the first column is the first tab")
+    match tuiwidget.tab_at(t, area(), 0, mono())
+        Some(i) => test.assert(i == 0)
+        None    => test.assert(false)
+
+    test.case("and a column past the last tab names nothing")
+    match tuiwidget.tab_at(t, area(), 19, mono())
+        Some(_) => test.assert(false)
+        None    => test.assert(true)
+
+@test
+fn test_a_tab_row_draws_its_divider_between_the_titles() [io]
+    let t = tuiwidget.default_tabs(["alpha", "beta"])
+
+    test.case("the default divider is not empty")
+    test.assert(t.divider != "")
+
+    test.case("and the first tab is the selected one")
+    test.assert(t.selected == 0)
+
+    test.case("the row draws into the first line")
+    let lines = tuibuf.buffer_text(tuiwidget.render_tabs(blank(), area(), t, mono()))
+    test.assert(list.get(lines, 0) != "                    ")
+
+@test
+fn test_a_scrollbars_thumb_is_never_shorter_than_a_cell() [io]
+    // A scrollbar over ten thousand lines whose thumb rounded to zero
+    // would be a track with nothing in it.
+    let s = tuiwidget.default_scrollbar(10000, 6, 0)
+    let drawn = tuiwidget.render_scrollbar(blank(), tuiarea.rect(19, 0, 1, 6), s)
+
+    test.case("something is drawn in the bar's column")
+    var drawn_cells = 0
+    var off_buffer = 0
+    for y in list.range(6)
+        match tuibuf.buffer_get(drawn, 19, y)
+            Some(c) =>
+                if c.glyph != 0
+                    drawn_cells = drawn_cells + 1
+            None    =>
+                off_buffer = off_buffer + 1
+    test.assert(drawn_cells > 0)
+
+    test.case("and every row of the bar is inside the buffer")
+    test.assert(off_buffer == 0)
+
+@test
+fn test_a_click_on_a_scrollbar_names_a_content_position() [io]
+    let s = tuiwidget.default_scrollbar(100, 10, 0)
+    let bar = tuiarea.rect(19, 0, 1, 6)
+
+    test.case("the top of the track is the top of the content")
+    match tuiwidget.scrollbar_position_at(s, bar, 19, 0)
+        Some(p) => test.assert(p == 0)
+        None    => test.assert(false)
+
+    test.case("the bottom is as far down as the viewport allows")
+    match tuiwidget.scrollbar_position_at(s, bar, 19, 5)
+        Some(p) => test.assert(p <= 90)
+        None    => test.assert(false)
+
+    test.case("and a click off the bar names nothing")
+    match tuiwidget.scrollbar_position_at(s, bar, 0, 0)
+        Some(_) => test.assert(false)
+        None    => test.assert(true)
+
+@test
+fn test_a_scrollbar_is_vertical_by_default() [io]
+    let s = tuiwidget.default_scrollbar(100, 10, 5)
+
+    test.case("the orientation is the layout's own direction type")
+    match s.orientation
+        TuiVertical => test.assert(true)
+        _           => test.assert(false)
+
+    test.case("with no end arrows, which cost two cells")
+    test.assert(s.show_ends == false)
+
+    test.case("and the position it was given")
+    test.assert(s.position == 5)
+
+@test
+fn test_the_alignments_are_this_packages_own() [io]
+    // Distinct from textwrap-nv's, because one places a title in a
+    // border and the other aligns the lines of a wrapped paragraph.
+    var b = tuiwidget.titled_block("t")
+    b.title_align = TuiAlignMiddle
+    b.footer_align = TuiAlignEnd
+
+    test.case("a title can be placed three ways")
+    match b.title_align
+        TuiAlignMiddle => test.assert(true)
+        _              => test.assert(false)
+
+    test.case("and so can a footer")
+    match b.footer_align
+        TuiAlignEnd => test.assert(true)
+        _           => test.assert(false)
+
+@test
+fn test_a_table_row_carries_its_own_style() [io]
+    let r = tuiwidget.table_row(["a", "b"])
+
+    test.case("two cells")
+    test.assert(list.len(r.cells) == 2)
+
+    test.case("in the terminal's own colours until a program says otherwise")
+    test.assert(sgr.attrs_eq(r.style, sgr.attrs_default()))

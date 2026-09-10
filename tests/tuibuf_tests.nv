@@ -1,0 +1,311 @@
+// tuibuf_tests.nv — the API suite for the cell buffer and the damage
+// model.
+//
+// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
+// assertion here reaches `not implemented: tui-nv.tuibuf.<fn>`.  Run
+// with `--isolate` for one verdict per `@test`.
+//
+// THE CASE THAT MATTERS is `test_two_identical_buffers_diff_to_nothing`.
+// The whole damage model rests on it: if an unchanged frame produced
+// patches, every frame would be a full redraw and the model would be a
+// slower way to do what it replaced.
+//
+// The row on every `@test` here is `[io]`, for `test.case` and nothing
+// else — which is the check that the whole of drawing a frame really
+// is `[]`, and that the one effect in a terminal program's loop is the
+// caller's single write.
+
+use std.test
+use std.list
+use sgr
+use widths
+use tuiarea
+use tuibuf
+
+// A small screen every case here can index by hand.
+fn area() -> tuiarea.TuiRect
+    tuiarea.rect(0, 0, 8, 3)
+
+fn mono() -> widths.WrapWidth
+    widths.monospace_width()
+
+@test
+fn test_a_new_buffer_is_blank_over_its_area() [io]
+    let b = tuibuf.buffer_new(area())
+
+    test.case("it covers what it was given")
+    test.assert(b.area.width == 8)
+    test.assert(list.len(b.cells) == 24)
+
+    test.case("and every cell is a blank in the terminal's own colours")
+    match tuibuf.buffer_get(b, 0, 0)
+        Some(c) =>
+            test.assert(c.glyph == 0)
+            test.assert(tuibuf.cell_eq(c, tuibuf.blank_cell()))
+        None    => test.assert(false)
+
+@test
+fn test_a_position_outside_the_area_has_no_cell() [io]
+    let b = tuibuf.buffer_new(area())
+
+    test.case("past the right edge")
+    match tuibuf.buffer_get(b, 8, 0)
+        Some(_) => test.assert(false)
+        None    => test.assert(true)
+
+    test.case("and a write there is dropped rather than a panic")
+    let after = tuibuf.buffer_set(b, 99, 99, tuibuf.cell_of(0x41, sgr.attrs_default(), mono()))
+    test.assert(list.len(after.cells) == 24)
+
+@test
+fn test_two_identical_buffers_diff_to_nothing() [io]
+    // The property the whole damage model rests on.
+    let b = tuibuf.buffer_new(area())
+
+    test.case("nothing changed, nothing to send")
+    test.assert(list.len(tuibuf.diff(b, b)) == 0)
+
+    test.case("and the bytes for no patches are no bytes")
+    let flush = tuibuf.patch_bytes([], tuibuf.diff(b, b), sgr.attrs_default())
+    test.assert(list.len(flush.bytes) == 0)
+
+@test
+fn test_one_changed_cell_is_one_patch() [io]
+    let before = tuibuf.buffer_new(area())
+    let after = tuibuf.buffer_set(before, 3, 1,
+                                  tuibuf.cell_of(0x41, sgr.attrs_default(), mono()))
+    let patches = tuibuf.diff(before, after)
+
+    test.case("one patch")
+    test.assert(list.len(patches) == 1)
+
+    test.case("at the cell that changed, in absolute coordinates")
+    let p = list.get(patches, 0)
+    test.assert(p.x == 3)
+    test.assert(p.y == 1)
+    test.assert(p.cell.glyph == 0x41)
+
+@test
+fn test_the_patches_come_out_in_screen_order() [io]
+    // Row by row, left to right — which is what lets a caller emit a
+    // cursor move only when the next patch is not where the last one
+    // left the cursor.
+    var b = tuibuf.buffer_new(area())
+    let a = tuibuf.cell_of(0x41, sgr.attrs_default(), mono())
+    b = tuibuf.buffer_set(b, 5, 2, a)
+    b = tuibuf.buffer_set(b, 1, 0, a)
+    b = tuibuf.buffer_set(b, 2, 0, a)
+
+    let patches = tuibuf.diff(tuibuf.buffer_new(area()), b)
+
+    test.case("three patches")
+    test.assert(list.len(patches) == 3)
+
+    test.case("sorted by row, then by column")
+    var last_y = 0 - 1
+    var last_x = 0 - 1
+    for p in patches
+        test.assert(p.y > last_y or p.y == last_y and p.x > last_x)
+        last_y = p.y
+        last_x = p.x
+
+@test
+fn test_a_style_change_alone_is_a_change() [io]
+    // A cell whose glyph is the same and whose colour is not still has
+    // to be redrawn, and a diff that only compared glyphs would leave
+    // the old colour on the screen.
+    var bold = sgr.attrs_default()
+    bold.bold = true
+
+    let before = tuibuf.buffer_filled(area(),
+                                      tuibuf.cell_of(0x41, sgr.attrs_default(), mono()))
+    let after = tuibuf.buffer_filled(area(), tuibuf.cell_of(0x41, bold, mono()))
+
+    test.case("every cell changed")
+    test.assert(list.len(tuibuf.diff(before, after)) == 24)
+
+@test
+fn test_a_wide_character_takes_two_cells_and_the_second_is_a_continuation() [io]
+    // A renderer that skipped it would leave whatever was there before
+    // showing through the right half of a CJK ideograph.
+    let cont = tuibuf.continuation_cell(sgr.attrs_default())
+
+    test.case("the continuation has no glyph and no width")
+    test.assert(cont.glyph == 0)
+    test.assert(cont.width == 0)
+
+    test.case("and it is not a blank, because a blank would be redrawn as a space")
+    test.assert(tuibuf.cell_eq(cont, tuibuf.blank_cell()) == false)
+
+@test
+fn test_a_string_write_reports_where_it_stopped() [io]
+    // What a caller drawing several styled runs on one line needs.
+    let b = tuibuf.buffer_new(area())
+    let w = tuibuf.buffer_set_str(b, 1, 0, "abc", sgr.attrs_default(), mono())
+
+    test.case("three ASCII cells advance three columns")
+    test.assert(w.next_x == 4)
+
+    test.case("and the glyphs are where they were put")
+    match tuibuf.buffer_get(w.buffer, 1, 0)
+        Some(c) => test.assert(c.glyph == 0x61)
+        None    => test.assert(false)
+
+@test
+fn test_a_string_write_is_clipped_at_the_edge() [io]
+    let b = tuibuf.buffer_new(area())
+    let w = tuibuf.buffer_set_str(b, 6, 0, "abcdef", sgr.attrs_default(), mono())
+
+    test.case("it stops at the right edge rather than wrapping")
+    test.assert(w.next_x <= 8)
+
+    test.case("and nothing landed on the next row")
+    match tuibuf.buffer_get(w.buffer, 0, 1)
+        Some(c) => test.assert(c.glyph == 0)
+        None    => test.assert(false)
+
+@test
+fn test_filling_and_clearing_are_inverses_over_a_blank() [io]
+    let blank = tuibuf.buffer_new(area())
+    let filled = tuibuf.buffer_fill(blank, area(),
+                                    tuibuf.cell_of(0x2E, sgr.attrs_default(), mono()))
+
+    test.case("filling changes every cell")
+    test.assert(list.len(tuibuf.diff(blank, filled)) == 24)
+
+    test.case("and clearing puts them back")
+    test.assert(list.len(tuibuf.diff(blank, tuibuf.buffer_clear(filled))) == 0)
+
+@test
+fn test_styling_a_region_leaves_its_glyphs_alone() [io]
+    // What a selection highlight is: the text is already drawn and only
+    // the attributes change.
+    var inverse = sgr.attrs_default()
+    inverse.inverse = true
+
+    let text = tuibuf.buffer_fill(tuibuf.buffer_new(area()), area(),
+                                  tuibuf.cell_of(0x41, sgr.attrs_default(), mono()))
+    let styled = tuibuf.buffer_style_region(text, tuiarea.rect(0, 1, 8, 1), inverse)
+
+    test.case("the glyph survives")
+    match tuibuf.buffer_get(styled, 0, 1)
+        Some(c) => test.assert(c.glyph == 0x41)
+        None    => test.assert(false)
+
+    test.case("and only the styled row is a change")
+    test.assert(list.len(tuibuf.diff(text, styled)) == 8)
+
+@test
+fn test_a_resize_keeps_the_cells_that_are_in_both() [io]
+    // Which is what makes the frame after a terminal resize a small
+    // diff rather than a whole screen.
+    let small = tuibuf.buffer_fill(tuibuf.buffer_new(area()), area(),
+                                   tuibuf.cell_of(0x41, sgr.attrs_default(), mono()))
+    let grown = tuibuf.buffer_resize(small, tuiarea.rect(0, 0, 16, 3))
+
+    test.case("the buffer is the new size")
+    test.assert(list.len(grown.cells) == 48)
+
+    test.case("the overlap kept its glyphs")
+    match tuibuf.buffer_get(grown, 0, 0)
+        Some(c) => test.assert(c.glyph == 0x41)
+        None    => test.assert(false)
+
+    test.case("and the new cells are blank")
+    match tuibuf.buffer_get(grown, 12, 0)
+        Some(c) => test.assert(c.glyph == 0)
+        None    => test.assert(false)
+
+@test
+fn test_merging_draws_one_buffer_over_another_at_its_own_position() [io]
+    // How a screen is built from panes, and how a popup goes on top.
+    let under = tuibuf.buffer_new(tuiarea.rect(0, 0, 8, 3))
+    let over = tuibuf.buffer_filled(tuiarea.rect(2, 1, 4, 1),
+                                    tuibuf.cell_of(0x58, sgr.attrs_default(), mono()))
+    let merged = tuibuf.buffer_merge(under, over)
+
+    test.case("the area is the one underneath")
+    test.assert(merged.area.width == 8)
+
+    test.case("the overlay landed where it says it is")
+    match tuibuf.buffer_get(merged, 2, 1)
+        Some(c) => test.assert(c.glyph == 0x58)
+        None    => test.assert(false)
+
+    test.case("and nothing outside it changed")
+    match tuibuf.buffer_get(merged, 0, 0)
+        Some(c) => test.assert(c.glyph == 0)
+        None    => test.assert(false)
+
+@test
+fn test_a_region_diff_looks_at_one_rectangle() [io]
+    var b = tuibuf.buffer_new(area())
+    let a = tuibuf.cell_of(0x41, sgr.attrs_default(), mono())
+    b = tuibuf.buffer_set(b, 0, 0, a)
+    b = tuibuf.buffer_set(b, 0, 2, a)
+
+    test.case("the whole buffer has two changes")
+    test.assert(list.len(tuibuf.diff(tuibuf.buffer_new(area()), b)) == 2)
+
+    test.case("and one row has one")
+    test.assert(list.len(tuibuf.diff_region(tuibuf.buffer_new(area()), b,
+                                            tuiarea.rect(0, 0, 8, 1))) == 1)
+
+@test
+fn test_the_damage_rectangle_covers_every_patch() [io]
+    var b = tuibuf.buffer_new(area())
+    let a = tuibuf.cell_of(0x41, sgr.attrs_default(), mono())
+    b = tuibuf.buffer_set(b, 1, 0, a)
+    b = tuibuf.buffer_set(b, 5, 2, a)
+    let damage = tuibuf.damage_rect(tuibuf.diff(tuibuf.buffer_new(area()), b))
+
+    test.case("from the first patch to the last")
+    test.assert(damage.x == 1)
+    test.assert(damage.y == 0)
+    test.assert(tuiarea.rect_right(damage) == 6)
+    test.assert(tuiarea.rect_bottom(damage) == 3)
+
+    test.case("and no patches means no damage")
+    test.assert(tuiarea.rect_is_empty(tuibuf.damage_rect([])))
+
+@test
+fn test_the_flush_reports_the_style_the_terminal_was_left_in() [io]
+    // The half a caller forgets: the next frame has to start from it,
+    // and there is no way to ask a terminal what state it is in.
+    var bold = sgr.attrs_default()
+    bold.bold = true
+
+    let before = tuibuf.buffer_new(area())
+    let after = tuibuf.buffer_set(before, 0, 0, tuibuf.cell_of(0x41, bold, mono()))
+    let flush = tuibuf.patch_bytes([], tuibuf.diff(before, after), sgr.attrs_default())
+
+    test.case("bytes came out")
+    test.assert(list.len(flush.bytes) > 0)
+
+    test.case("and the style is the one the last patch needed")
+    test.assert(sgr.attrs_eq(flush.style, bold))
+
+@test
+fn test_a_whole_buffer_can_be_sent_unconditionally() [io]
+    // The first frame, and the frame after a resize, where what the
+    // terminal is showing is unknown.
+    let b = tuibuf.buffer_filled(area(),
+                                 tuibuf.cell_of(0x41, sgr.attrs_default(), mono()))
+    let flush = tuibuf.buffer_bytes([], b, sgr.attrs_default())
+
+    test.case("every cell reached the wire")
+    test.assert(list.len(flush.bytes) > 24)
+
+@test
+fn test_the_buffer_reads_back_as_text() [io]
+    // What makes a widget's output assertable with no terminal
+    // anywhere, which is most of what the core layer buys here.
+    let b = tuibuf.buffer_set_str(tuibuf.buffer_new(area()), 0, 0, "hi",
+                                  sgr.attrs_default(), mono())
+    let lines = tuibuf.buffer_text(b.buffer)
+
+    test.case("one line per row")
+    test.assert(list.len(lines) == 3)
+
+    test.case("and the text is where it was written")
+    test.assert(list.get(lines, 0) == "hi      ")

@@ -1,0 +1,244 @@
+// tuiarea.nv — rectangles, and the constraint solver that divides one.
+//
+// Every body here is a `todo()`; the signatures are the design.
+//
+// A LAYOUT IS ONE RECTANGLE BECOMING SEVERAL.  There is no tree here,
+// no parent pointers and no widget that owns an area: `split` takes a
+// rectangle and a list of constraints and returns a rectangle per
+// constraint, and a program builds a whole screen by calling it again
+// on the pieces.  That is ratatui's model, and it is the reason a
+// layout can be a pure function — nothing is retained between frames,
+// so nothing can be stale.
+//
+// THE COORDINATES ARE ZERO-BASED, and ansi-nv's are one-based.  The
+// conversion happens once, where the caller turns a patch into a
+// cursor move, and it is written down in `tuibuf`'s header rather than
+// spread across two packages that each half-assume it.
+//
+// SIX CONSTRAINTS, AND THE ORDER THEY ARE SATISFIED IN IS THE WHOLE
+// BEHAVIOUR.  A solver that treated them as equals produces layouts
+// that jump by a cell when a window is resized, which is the bug every
+// hand-rolled terminal layout has.  `split`'s doc comment states the
+// order; it is a promise, not an implementation detail, because a
+// program's screen is built on top of it.
+
+// TuiRect is a rectangle of cells.
+//
+// Zero-based, with `x` the column and `y` the row, and `width` and
+// `height` counts rather than far edges — so an empty rectangle is one
+// with a zero in it and `rect_right` is `x + width`, exclusive.  The
+// exclusive edge is the choice that makes `rect_intersection` and the
+// splitter's arithmetic come out without an off-by-one anywhere.
+pub struct TuiRect
+    x: Int
+    y: Int
+    width: Int
+    height: Int
+
+// TuiMargin is how much of a rectangle to give away on each side.
+//
+// Two numbers rather than four, because a terminal layout that wanted
+// different top and bottom margins wants a `TuiFixed` constraint
+// instead — and a four-field margin is four fields every caller fills
+// in with two values.
+pub struct TuiMargin
+    horizontal: Int
+    vertical: Int
+
+// TuiDirection is which way a split runs.
+//
+// Also what a scrollbar's orientation is, which is why it is here
+// rather than in the widget module: the two are the same question and
+// two enums would be two enums a caller converts between.
+pub enum TuiDirection
+    // Side by side; the constraints divide the width.
+    TuiHorizontal
+    // Stacked; the constraints divide the height.
+    TuiVertical
+
+// TuiConstraint is how much of the axis one piece wants.
+pub enum TuiConstraint
+    // Exactly this many cells.  A status bar is `TuiFixed(1)`.
+    TuiFixed(cells: Int)
+    // This percentage of the axis, rounded down.
+    TuiPercentage(percent: Int)
+    // This fraction of the axis — `TuiRatio(1, 3)`.  A separate
+    // variant from `TuiPercentage` because a third is not 33 percent
+    // and three of them are not 99.
+    TuiRatio(numerator: Int, denominator: Int)
+    // At least this many cells, and more if there is room.
+    TuiMinimum(cells: Int)
+    // At most this many cells, and fewer if there is not room.
+    TuiMaximum(cells: Int)
+    // Whatever is left, shared with the other `TuiFill`s in proportion
+    // to their weights.  The constraint a main pane wants, and the one
+    // that makes a layout add up to the rectangle it was given.
+    TuiFill(weight: Int)
+
+// TuiLayoutSpec is a whole split: the direction, the margin, the
+// spacing and the constraints.
+//
+// A value rather than a builder, because a builder that had to be
+// finished before it could be used is a builder a caller forgets to
+// finish, and because a layout that is a value can be a constant.
+pub struct TuiLayoutSpec
+    direction: TuiDirection
+    margin: TuiMargin
+    // Cells left blank between adjacent pieces.  Counted against the
+    // axis before the constraints are solved, so a spacing that does
+    // not fit shrinks the pieces rather than overflowing the
+    // rectangle.
+    spacing: Int
+    constraints: [TuiConstraint]
+
+// rect is a rectangle from its four numbers.
+//
+// A negative width or height is clamped to zero, so that every
+// rectangle this package produces is one an index loop can walk
+// without a guard.
+pub fn rect(x: Int, y: Int, width: Int, height: Int) -> TuiRect
+    todo("tui-nv.tuiarea.rect")
+
+// rect_empty is the zero rectangle at the origin.
+//
+// What a split returns for a constraint there was no room for, and
+// what a widget renders into when its area was squeezed to nothing —
+// which has to be a rectangle rather than an absent one, so that a
+// caller's render loop needs no special case.
+pub fn rect_empty() -> TuiRect
+    todo("tui-nv.tuiarea.rect_empty")
+
+// rect_right is the column one past the right edge.
+pub fn rect_right(r: TuiRect) -> Int
+    todo("tui-nv.tuiarea.rect_right")
+
+// rect_bottom is the row one past the bottom edge.
+pub fn rect_bottom(r: TuiRect) -> Int
+    todo("tui-nv.tuiarea.rect_bottom")
+
+// rect_area is how many cells a rectangle holds.
+pub fn rect_area(r: TuiRect) -> Int
+    todo("tui-nv.tuiarea.rect_area")
+
+// rect_is_empty says whether a rectangle holds no cells.
+pub fn rect_is_empty(r: TuiRect) -> Bool
+    todo("tui-nv.tuiarea.rect_is_empty")
+
+// rect_contains says whether a cell is inside a rectangle.
+pub fn rect_contains(r: TuiRect, x: Int, y: Int) -> Bool
+    todo("tui-nv.tuiarea.rect_contains")
+
+// rect_intersects says whether two rectangles share a cell.
+//
+// The question a mouse click asks — which pane was that in — and the
+// reason a program does not need its own geometry.
+pub fn rect_intersects(a: TuiRect, b: TuiRect) -> Bool
+    todo("tui-nv.tuiarea.rect_intersects")
+
+// rect_intersection is the rectangle two rectangles share, empty when
+// they share nothing.
+//
+// What clips a widget to its area: a render that walked past its
+// rectangle would corrupt whatever is beside it, and every widget in
+// `tuiwidget` is written to clip through this rather than to trust its
+// own arithmetic.
+pub fn rect_intersection(a: TuiRect, b: TuiRect) -> TuiRect
+    todo("tui-nv.tuiarea.rect_intersection")
+
+// rect_union is the smallest rectangle holding both.
+//
+// For a caller accumulating a damage region of its own — the whole of
+// what changed, as one rectangle — which is a coarser answer than
+// `tuibuf.diff` and cheaper to act on when almost everything changed.
+pub fn rect_union(a: TuiRect, b: TuiRect) -> TuiRect
+    todo("tui-nv.tuiarea.rect_union")
+
+// rect_inner is a rectangle with a margin taken off every side.
+//
+// Clamped to empty rather than going negative, so a margin larger than
+// the rectangle produces nothing to draw in instead of a rectangle
+// that wraps around.
+pub fn rect_inner(r: TuiRect, m: TuiMargin) -> TuiRect
+    todo("tui-nv.tuiarea.rect_inner")
+
+// rect_clamp moves and shrinks a rectangle until it is inside another.
+//
+// For a popup that would hang off the edge of the screen, which is the
+// one case where the right answer is to move it rather than to clip
+// it.
+pub fn rect_clamp(r: TuiRect, bounds: TuiRect) -> TuiRect
+    todo("tui-nv.tuiarea.rect_clamp")
+
+// centred is a rectangle of the given size, centred inside another.
+//
+// A dialog, and the arithmetic every program writes once and gets
+// wrong on an odd number of columns.  It rounds towards the top left,
+// which is the convention every terminal program has converged on.
+pub fn centred(width: Int, height: Int, bounds: TuiRect) -> TuiRect
+    todo("tui-nv.tuiarea.centred")
+
+// no_margin is a margin of zero on both axes.
+pub fn no_margin() -> TuiMargin
+    todo("tui-nv.tuiarea.no_margin")
+
+// layout is a spec from a direction and its constraints, with no
+// margin and no spacing.
+pub fn layout(direction: TuiDirection, constraints: [TuiConstraint]) -> TuiLayoutSpec
+    todo("tui-nv.tuiarea.layout")
+
+// split divides a rectangle, one piece per constraint.
+//
+// THE ORDER IS THE BEHAVIOUR, and it is a promise:
+//
+//   1. the margin comes off, then the spacing between the pieces;
+//   2. `TuiFixed`, `TuiPercentage` and `TuiRatio` take what they asked
+//      for, in the order they were written, until the axis runs out;
+//   3. `TuiMinimum` takes its minimum and `TuiMaximum` takes the
+//      lesser of its maximum and what is left;
+//   4. `TuiFill` shares whatever remains in proportion to the weights;
+//   5. any cell left over by the rounding goes to the LAST piece that
+//      can grow, so that the pieces always add up to the rectangle.
+//
+// Step 5 is the one that matters and the one every hand-rolled layout
+// gets wrong: without it a layout gains and loses a cell as a window
+// is resized, and the whole screen shifts by one.
+//
+// The result always has one rectangle per constraint, in the same
+// order — an empty one where there was no room — so a caller may index
+// it against the list it passed in.
+//
+// ```novo
+// use tuiarea
+//
+// fn main() [io]
+//     let screen = tuiarea.rect(0, 0, 80, 24)
+//     let rows = tuiarea.split(screen,
+//         tuiarea.layout(TuiVertical, [TuiFixed(1), TuiFill(1), TuiFixed(1)]))
+//     // rows[0] is the title bar, rows[2] the status line, and
+//     // rows[1] is everything in between — 22 rows of it.
+//     println(str.from_int(list.get(rows, 1).height))
+// ```
+pub fn split(area: TuiRect, spec: TuiLayoutSpec) -> [TuiRect]
+    todo("tui-nv.tuiarea.split")
+
+// split_at divides a rectangle in two at a fixed offset along the
+// direction.
+//
+// The one-line case, for a caller that wants a header off the top and
+// does not want to build a constraint list to say so.
+pub fn split_at(area: TuiRect, direction: TuiDirection, offset: Int) -> [TuiRect]
+    todo("tui-nv.tuiarea.split_at")
+
+// constraint_min is the fewest cells a constraint can be satisfied
+// with.
+//
+// Exposed because a program that wants to refuse a window too small to
+// draw in — rather than draw something illegible — needs to add these
+// up before it splits anything.
+pub fn constraint_min(c: TuiConstraint) -> Int
+    todo("tui-nv.tuiarea.constraint_min")
+
+// spec_min is the fewest cells along the axis a whole spec needs,
+// margin and spacing included.
+pub fn spec_min(spec: TuiLayoutSpec) -> Int
+    todo("tui-nv.tuiarea.spec_min")

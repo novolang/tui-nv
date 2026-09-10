@@ -1,0 +1,389 @@
+// tuiwidget.nv — the widgets a real program needs, each of them a pure
+// function from a value and an area into a buffer.
+//
+// Every body here is a `todo()`; the signatures are the design.
+//
+// A WIDGET IS A VALUE AND A FUNCTION, NOT AN OBJECT.  There is no
+// trait, no `render` method and no widget that holds a buffer: a
+// `TuiBlock` is what a block looks like, and `render_block` draws one.
+// That is ratatui's immediate-mode model, and it is what makes a frame
+// reproducible — nothing survives between frames, so nothing can be
+// stale, and a test can render the same value twice and get the same
+// cells.
+//
+// WHY NOT A TRAIT.  `trait Widget` with a `render` method would let a
+// program hold a heterogeneous list of them, and it would cost this
+// package its budget: `dyn Trait` is charged the union of every impl
+// in the program (SPEC § 5.6), so one consumer with an effectful
+// widget would make the whole surface effectful.  A program that wants
+// a list of things to draw writes an enum of its own widgets and one
+// match, which is the same code with the cost where the program can
+// see it.
+//
+// THE STATE A WIDGET NEEDS IS ON THE VALUE, AND THE PROGRAM OWNS IT.
+// A list's selection and scroll offset are fields of `TuiListView`,
+// not something the widget remembers — so a program that has two lists
+// has two values, and a program that saves its session saves them.
+// `list_offset_for` is the one piece of scroll arithmetic worth
+// sharing, and it is a function rather than a hidden update.
+
+use sgr
+use widths
+use wrapping
+use tuiarea
+use tuibuf
+
+// TuiAlign is where text sits inside the width it was given.
+//
+// Distinct from textwrap-nv's `WrapAlign`, which aligns the lines of a
+// wrapped paragraph.  This one places a title in a border and a cell
+// in a table column, and folding the two would mean this package's
+// public surface changed whenever textwrap-nv's did.
+pub enum TuiAlign
+    TuiAlignStart
+    TuiAlignMiddle
+    TuiAlignEnd
+
+// TuiBorderKind is which glyphs a block's border is drawn with.
+pub enum TuiBorderKind
+    // No border at all; the block is its background and its title.
+    TuiNoBorder
+    // The single-line box-drawing characters.
+    TuiPlainBorder
+    // The same, with rounded corners.
+    TuiRoundedBorder
+    // The double-line set.
+    TuiDoubleBorder
+    // The heavy set.
+    TuiThickBorder
+    // Half-block characters, which draw a border that sits between the
+    // cells rather than in them — the only kind that does not cost a
+    // whole cell of content on each side.
+    TuiQuadrantBorder
+    // ASCII: `+`, `-` and `|`.  For a terminal or a font that has no
+    // box-drawing characters, which is still a real case over a serial
+    // console.
+    TuiAsciiBorder
+
+// TuiSides is which of the four edges of a block are drawn.
+//
+// Four booleans rather than a bitmask, because a bitmask is four
+// constants a caller has to look up and a struct is four fields an
+// editor completes.
+pub struct TuiSides
+    top: Bool
+    bottom: Bool
+    left: Bool
+    right: Bool
+
+// TuiBlock is a bordered, titled region — the widget every other
+// widget is drawn inside.
+pub struct TuiBlock
+    border: TuiBorderKind
+    sides: TuiSides
+    // Drawn into the top edge when there is one, and into the first
+    // row when there is not.
+    title: Str
+    title_align: TuiAlign
+    // Drawn into the bottom edge.  A separate field rather than a
+    // second block, because a pane's title and its status line are one
+    // widget in every program that has both.
+    footer: Str
+    footer_align: TuiAlign
+    // The background of the whole block, border included.
+    style: sgr.SgrAttrs
+    // The border's own style, which is how a focused pane is
+    // distinguished from an unfocused one.
+    border_style: sgr.SgrAttrs
+    title_style: sgr.SgrAttrs
+
+// TuiParagraph is wrapped or clipped text.
+pub struct TuiParagraph
+    text: Str
+    style: sgr.SgrAttrs
+    // `None` clips at the right edge instead of wrapping, which is
+    // what a log line wants: wrapping a log makes the rows stop
+    // lining up with anything.
+    wrap: ?wrapping.WrapOptions
+    align: TuiAlign
+    // How many wrapped lines to skip.  The program owns it, because
+    // the program owns the scroll position.
+    scroll_rows: Int
+    // How many columns to skip, for the clipping case.
+    scroll_cols: Int
+
+// TuiListView is a vertical list with an optional selection.
+pub struct TuiListView
+    items: [Str]
+    // `None` for a list nothing is selected in.
+    selected: ?Int
+    // The index of the first item drawn.  A field rather than
+    // something the widget computes, so that a program can scroll
+    // without moving the selection — which is what a mouse wheel over
+    // a list does.
+    offset: Int
+    style: sgr.SgrAttrs
+    selected_style: sgr.SgrAttrs
+    // Drawn before the selected item and, as spaces, before every
+    // other — so that the text lines up whichever is selected.
+    highlight_prefix: Str
+
+// TuiRow is one row of a table.
+pub struct TuiRow
+    cells: [Str]
+    style: sgr.SgrAttrs
+
+// TuiTableView is a table with sized columns and an optional
+// selection.
+pub struct TuiTableView
+    // Drawn in `header_style` and never scrolled away.  Empty for a
+    // table with no header.
+    header: [Str]
+    rows: [TuiRow]
+    // One constraint per column, solved by `tuiarea.split` across the
+    // table's width — so a column may be fixed, a percentage, or fill
+    // whatever is left, with the same rules the screen layout uses.
+    widths: [tuiarea.TuiConstraint]
+    selected: ?Int
+    offset: Int
+    column_spacing: Int
+    style: sgr.SgrAttrs
+    header_style: sgr.SgrAttrs
+    selected_style: sgr.SgrAttrs
+
+// TuiGauge is a progress bar.
+pub struct TuiGauge
+    // 0.0 to 1.0.  Outside that range is clamped, because a gauge that
+    // drew past its area on a ratio of 1.2 is a gauge that corrupts
+    // whatever is beside it.
+    ratio: Float
+    // `None` draws the percentage; a `Some` replaces it.
+    label: ?Str
+    style: sgr.SgrAttrs
+    // The filled part's style.
+    gauge_style: sgr.SgrAttrs
+    // Use the eighth-block characters for a partly-filled cell, which
+    // gives eight times the resolution and needs a font that has them.
+    unicode_blocks: Bool
+
+// TuiTabs is a row of labels with one selected.
+pub struct TuiTabs
+    titles: [Str]
+    selected: Int
+    // Drawn between adjacent titles.
+    divider: Str
+    style: sgr.SgrAttrs
+    selected_style: sgr.SgrAttrs
+
+// TuiScrollbar is the bar beside a scrollable region.
+pub struct TuiScrollbar
+    orientation: tuiarea.TuiDirection
+    // How many items there are in total.
+    content_len: Int
+    // How many are visible at once.  The thumb's length is this over
+    // the total, which is the whole of what a scrollbar tells a
+    // reader that a percentage does not.
+    viewport_len: Int
+    // The index of the first visible item.
+    position: Int
+    thumb_style: sgr.SgrAttrs
+    track_style: sgr.SgrAttrs
+    // Draw the ends as arrows, which costs two cells and tells a
+    // reader the bar is a bar.
+    show_ends: Bool
+
+// all_sides is every edge drawn.
+pub fn all_sides() -> TuiSides
+    todo("tui-nv.tuiwidget.all_sides")
+
+// no_sides is no edge drawn.
+pub fn no_sides() -> TuiSides
+    todo("tui-nv.tuiwidget.no_sides")
+
+// default_block is a plain single-line border on all four sides, no
+// title, in the terminal's own colours.
+pub fn default_block() -> TuiBlock
+    todo("tui-nv.tuiwidget.default_block")
+
+// titled_block is `default_block` with a title.
+pub fn titled_block(title: Str) -> TuiBlock
+    todo("tui-nv.tuiwidget.titled_block")
+
+// block_inner is the area inside a block's borders.
+//
+// THE FUNCTION A LAYOUT CALLS BEFORE IT DRAWS ANYTHING ELSE.  A block
+// is drawn into an area, and everything inside it is drawn into this
+// — so a program's layout is `split`, then `block_inner`, then
+// `split` again.  It is a separate function from `render_block`
+// because the inner area is needed before the block is drawn as often
+// as after.
+pub fn block_inner(b: TuiBlock, area: tuiarea.TuiRect) -> tuiarea.TuiRect
+    todo("tui-nv.tuiwidget.block_inner")
+
+// render_block draws a block's border, title and background.
+//
+// ```novo
+// use tuiarea
+// use tuibuf
+// use tuiwidget
+//
+// fn main() [io]
+//     let area = tuiarea.rect(0, 0, 40, 10)
+//     var buf = tuibuf.buffer_new(area)
+//     let block = tuiwidget.titled_block(" logs ")
+//     buf = tuiwidget.render_block(buf, area, block)
+//     // Everything else goes inside:
+//     let inner = tuiwidget.block_inner(block, area)
+//     println(str.from_int(inner.width))     // 38
+// ```
+pub fn render_block(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, b: TuiBlock) -> tuibuf.TuiBuffer
+    todo("tui-nv.tuiwidget.render_block")
+
+// default_paragraph is unwrapped, unscrolled, start-aligned text in
+// the terminal's own colours.
+pub fn default_paragraph(text: Str) -> TuiParagraph
+    todo("tui-nv.tuiwidget.default_paragraph")
+
+// render_paragraph draws text into an area, wrapping it if the
+// paragraph says to and clipping it if not.
+pub fn render_paragraph(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, p: TuiParagraph,
+                        w: widths.WrapWidth) -> tuibuf.TuiBuffer
+    todo("tui-nv.tuiwidget.render_paragraph")
+
+// paragraph_height is how many rows a paragraph would take at a width.
+//
+// What a layout asks before it decides how tall to make one — a popup
+// sized to its message, a help pane that grows with its text — and it
+// is textwrap-nv's `wrapped_height` with the paragraph's own options
+// applied, so that the answer and the drawing cannot disagree.
+pub fn paragraph_height(p: TuiParagraph, columns: Int, w: widths.WrapWidth) -> Int
+    todo("tui-nv.tuiwidget.paragraph_height")
+
+// default_list is a list with nothing selected, no scroll and no
+// highlight prefix.
+pub fn default_list(items: [Str]) -> TuiListView
+    todo("tui-nv.tuiwidget.default_list")
+
+// render_list draws a list, the selected item in its own style.
+pub fn render_list(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, l: TuiListView,
+                   w: widths.WrapWidth) -> tuibuf.TuiBuffer
+    todo("tui-nv.tuiwidget.render_list")
+
+// list_offset_for is the scroll offset that keeps the selection
+// visible.
+//
+// A function the PROGRAM calls to update its own `offset` field,
+// rather than something the widget does behind its back.  A widget
+// that silently scrolled would be a widget that disagrees with the
+// program about where the list is, which is how a selection ends up
+// half a screen from where the arrow keys think it is.
+//
+// It keeps the selection where it already is when it is already
+// visible, so that scrolling with the mouse and moving with the arrows
+// do not fight.
+pub fn list_offset_for(l: TuiListView, height: Int) -> Int
+    todo("tui-nv.tuiwidget.list_offset_for")
+
+// list_item_at is which item is at a row of the list's area, or `None`
+// for a row past the end.
+//
+// What a mouse click needs, and the arithmetic is the widget's rather
+// than the program's because it depends on the offset the widget drew
+// with.
+pub fn list_item_at(l: TuiListView, area: tuiarea.TuiRect, y: Int) -> ?Int
+    todo("tui-nv.tuiwidget.list_item_at")
+
+// default_table is a table with no header, no selection and no
+// spacing.
+pub fn default_table(rows: [TuiRow], widths: [tuiarea.TuiConstraint]) -> TuiTableView
+    todo("tui-nv.tuiwidget.default_table")
+
+// table_row is a row from its cells, in the terminal's own colours.
+pub fn table_row(cells: [Str]) -> TuiRow
+    todo("tui-nv.tuiwidget.table_row")
+
+// table_columns is where each column starts and how wide it is.
+//
+// `tuiarea.split` across the table's width with the column
+// constraints, exposed because a program that wants to draw a
+// separator between columns, or to know which column a click landed
+// in, needs the same answer the renderer used.
+pub fn table_columns(t: TuiTableView, area: tuiarea.TuiRect) -> [tuiarea.TuiRect]
+    todo("tui-nv.tuiwidget.table_columns")
+
+// render_table draws a table: the header, then the rows from the
+// offset, each cell truncated to its column.
+pub fn render_table(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, t: TuiTableView,
+                    w: widths.WrapWidth) -> tuibuf.TuiBuffer
+    todo("tui-nv.tuiwidget.render_table")
+
+// default_gauge is a gauge at a ratio, labelled with its percentage,
+// without the eighth-block characters.
+pub fn default_gauge(ratio: Float) -> TuiGauge
+    todo("tui-nv.tuiwidget.default_gauge")
+
+// render_gauge draws a progress bar with its label centred over it.
+//
+// The label is drawn ON the bar rather than beside it, and the cells
+// under the filled part take the gauge's style — which is what makes a
+// gauge readable at every ratio rather than only when the label
+// happens to be outside the fill.
+pub fn render_gauge(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, g: TuiGauge,
+                    w: widths.WrapWidth) -> tuibuf.TuiBuffer
+    todo("tui-nv.tuiwidget.render_gauge")
+
+// default_tabs is a row of titles with the first selected and a
+// vertical bar between them.
+pub fn default_tabs(titles: [Str]) -> TuiTabs
+    todo("tui-nv.tuiwidget.default_tabs")
+
+// render_tabs draws a row of labels, the selected one in its own
+// style.
+pub fn render_tabs(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, t: TuiTabs,
+                   w: widths.WrapWidth) -> tuibuf.TuiBuffer
+    todo("tui-nv.tuiwidget.render_tabs")
+
+// tab_at is which tab is at a column of the tabs' area, or `None` for
+// a column that is between them or past the end.
+pub fn tab_at(t: TuiTabs, area: tuiarea.TuiRect, x: Int, w: widths.WrapWidth) -> ?Int
+    todo("tui-nv.tuiwidget.tab_at")
+
+// default_scrollbar is a vertical bar with no end arrows.
+pub fn default_scrollbar(content_len: Int, viewport_len: Int, position: Int) -> TuiScrollbar
+    todo("tui-nv.tuiwidget.default_scrollbar")
+
+// render_scrollbar draws a track and a thumb.
+//
+// The thumb's length is the viewport over the content, with a minimum
+// of one cell — a scrollbar over ten thousand lines whose thumb
+// rounded to zero would be a track with nothing in it, which is the
+// bug every hand-rolled scrollbar has.
+pub fn render_scrollbar(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect,
+                        s: TuiScrollbar) -> tuibuf.TuiBuffer
+    todo("tui-nv.tuiwidget.render_scrollbar")
+
+// scrollbar_position_at is the content position a click on the bar
+// means, or `None` for a click outside it.
+pub fn scrollbar_position_at(s: TuiScrollbar, area: tuiarea.TuiRect, x: Int, y: Int) -> ?Int
+    todo("tui-nv.tuiwidget.scrollbar_position_at")
+
+// border_glyph is one of a border's characters — the eight of them,
+// by position.
+//
+// Exposed because a program drawing its own divider between two panes
+// wants the same glyphs the blocks around them are drawn with, and
+// because the alternative is that it hard-codes a codepoint that does
+// not match `TuiAsciiBorder`.
+pub fn border_glyph(kind: TuiBorderKind, position: TuiBorderPart) -> Int
+    todo("tui-nv.tuiwidget.border_glyph")
+
+// TuiBorderPart names one of the eight pieces a border is drawn from.
+pub enum TuiBorderPart
+    TuiBorderTop
+    TuiBorderBottom
+    TuiBorderLeft
+    TuiBorderRight
+    TuiBorderTopLeft
+    TuiBorderTopRight
+    TuiBorderBottomLeft
+    TuiBorderBottomRight
