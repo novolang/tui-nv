@@ -1,6 +1,6 @@
 [package]
 name        = "tui-nv"
-version     = "0.0.1"
+version     = "0.0.2"
 description = "Layout, widgets and the damage model for a terminal user interface, with the writer belonging to the caller: a constraint solver over rectangles, a cell buffer, a diff of two buffers into the smallest set of changes, and the widgets a real program needs — block, paragraph, list, table, gauge, tabs, scrollbar.  Nothing here writes to a terminal.  Interface only — every body is a todo()."
 license     = "Apache-2.0"
 
