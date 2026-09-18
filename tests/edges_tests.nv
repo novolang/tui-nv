@@ -1,0 +1,510 @@
+// edges_tests.nv — the cases the three API suites leave out.
+//
+// The API suites assert what the package promises.  This one walks the
+// answers at the edges of each promise: an empty rectangle, a
+// constraint list with nothing in it, text wider than the area it is
+// drawn into, a scrollbar lying along the other axis, and the border
+// sets no in-tree program draws with yet.  Together the four suites
+// execute every line under `src/`, which `bash tests/coverage.sh`
+// measures.
+
+use std.test
+use std.list
+use sgr
+use widths
+use tuiarea
+use tuibuf
+use tuiwidget
+
+fn area() -> tuiarea.TuiRect
+    tuiarea.rect(0, 0, 20, 6)
+
+fn small() -> tuiarea.TuiRect
+    tuiarea.rect(0, 0, 8, 3)
+
+fn uni() -> widths.WrapWidth
+    widths.unicode_width()
+
+fn blank() -> tuibuf.TuiBuffer
+    tuibuf.buffer_new(area())
+
+@test
+fn test_a_union_with_an_empty_rectangle_is_the_other_one() [io]
+    // An empty rectangle holds no cells, so it adds none to a union.
+    let r = tuiarea.rect(2, 2, 4, 4)
+
+    test.case("the empty one on the right")
+    let u = tuiarea.rect_union(r, tuiarea.rect_empty())
+    test.assert(u.x == 2)
+    test.assert(u.width == 4)
+
+    test.case("and on the left")
+    let v = tuiarea.rect_union(tuiarea.rect_empty(), r)
+    test.assert(v.width == 4)
+
+@test
+fn test_nothing_fits_inside_nothing() [io]
+    test.case("a rectangle clamped into empty bounds is empty")
+    test.assert(tuiarea.rect_is_empty(tuiarea.rect_clamp(tuiarea.rect(0, 0, 4, 4),
+                                                         tuiarea.rect_empty())))
+
+    test.case("and a centred rectangle of no size is empty")
+    test.assert(tuiarea.rect_is_empty(tuiarea.centred(0, 5, area())))
+
+@test
+fn test_a_layout_with_no_constraints_answers_no_rectangles() [io]
+    // Rather than one rectangle covering everything, which a caller
+    // indexing the answer against its own list would read as a piece
+    // it never asked for.
+    test.case("no pieces")
+    test.assert(list.is_empty(tuiarea.split(area(), tuiarea.layout(TuiVertical, []))))
+
+@test
+fn test_a_ratio_of_nothing_takes_nothing() [io]
+    // A denominator of zero has no fraction, and a numerator of zero
+    // asks for none of the axis.
+    let cols = tuiarea.split(tuiarea.rect(0, 0, 40, 4),
+                             tuiarea.layout(TuiHorizontal,
+                                            [TuiRatio(1, 0), TuiRatio(0, 3),
+                                             TuiFill(1)]))
+
+    test.case("both take no cells")
+    test.assert(list.get(cols, 0).width == 0)
+    test.assert(list.get(cols, 1).width == 0)
+
+    test.case("and the fill takes the whole axis")
+    test.assert(list.get(cols, 2).width == 40)
+
+@test
+fn test_the_leftover_goes_to_a_minimum_when_there_is_no_fill() [io]
+    // A minimum is a floor rather than a size, so it is the last piece
+    // that can grow when nothing else can.
+    let cols = tuiarea.split(tuiarea.rect(0, 0, 100, 4),
+                             tuiarea.layout(TuiHorizontal,
+                                            [TuiPercentage(30), TuiMinimum(10)]))
+
+    test.case("the percentage took its thirty")
+    test.assert(list.get(cols, 0).width == 30)
+
+    test.case("and the minimum took the rest")
+    test.assert(list.get(cols, 1).width == 70)
+
+@test
+fn test_a_horizontal_spec_counts_its_horizontal_margin() [io]
+    // The margin a spec takes off is the one along the axis it
+    // divides.
+    let spec = TuiLayoutSpec { direction: TuiHorizontal,
+                               margin: TuiMargin { horizontal: 2, vertical: 5 },
+                               spacing: 0,
+                               constraints: [TuiFixed(4)] }
+
+    test.case("four cells and a margin on each side")
+    test.assert(tuiarea.spec_min(spec) == 8)
+
+    test.case("and one constraint has no spacing between anything")
+    test.assert(tuiarea.spec_min(tuiarea.layout(TuiVertical, [TuiFixed(3)])) == 3)
+
+@test
+fn test_a_combining_mark_takes_no_cell() [io]
+    // Its width under the Unicode rule is zero, so it is not a cell
+    // the terminal draws in and the write does not advance.
+    let c = tuibuf.cell_of(0x0301, sgr.attrs_default(), uni())
+
+    test.case("no columns")
+    test.assert(c.width == 0)
+
+    test.case("and a string ending in one stops where its base did")
+    let w = tuibuf.buffer_set_str(tuibuf.buffer_new(small()), 0, 0,
+                                  "e" + str.from_char(0x0301), sgr.attrs_default(),
+                                  uni())
+    test.assert(w.next_x == 1)
+
+@test
+fn test_a_wide_character_writes_its_continuation() [io]
+    // The second cell carries the same style and no glyph, so a
+    // background colour runs across both halves.
+    let w = tuibuf.buffer_set_str(tuibuf.buffer_new(small()), 0, 0, "漢",
+                                  sgr.attrs_default(), uni())
+
+    test.case("two columns")
+    test.assert(w.next_x == 2)
+
+    test.case("the first cell holds the character")
+    match tuibuf.buffer_get(w.buffer, 0, 0)
+        Some(c) =>
+            test.assert(c.glyph == 0x6F22)
+            test.assert(c.width == 2)
+        None    => test.assert(false)
+
+    test.case("and the second is a continuation")
+    match tuibuf.buffer_get(w.buffer, 1, 0)
+        Some(c) => test.assert(c.width == 0)
+        None    => test.assert(false)
+
+@test
+fn test_a_byte_that_begins_nothing_draws_the_replacement_character() [io]
+    // So that text from outside the program draws something rather
+    // than shifting every cell after it.
+    let w = tuibuf.buffer_set_str(tuibuf.buffer_new(small()), 0, 0,
+                                  str.from_byte(0x80), sgr.attrs_default(), uni())
+
+    test.case("one cell, and it is U+FFFD")
+    match tuibuf.buffer_get(w.buffer, 0, 0)
+        Some(c) => test.assert(c.glyph == 0xFFFD)
+        None    => test.assert(false)
+
+    test.case("while the two-byte and four-byte forms decode")
+    let t = tuibuf.buffer_set_str(tuibuf.buffer_new(small()), 0, 0,
+                                  "é" + str.from_char(0x1F600), sgr.attrs_default(),
+                                  uni())
+    match tuibuf.buffer_get(t.buffer, 0, 0)
+        Some(c) => test.assert(c.glyph == 0xE9)
+        None    => test.assert(false)
+    match tuibuf.buffer_get(t.buffer, 1, 0)
+        Some(c) => test.assert(c.glyph == 0x1F600)
+        None    => test.assert(false)
+
+@test
+fn test_a_buffer_that_grew_has_cells_that_were_never_drawn() [io]
+    // Two buffers of different areas diff over what they share, and
+    // every cell of the new one outside the old one is a patch.
+    let small_buf = tuibuf.buffer_new(tuiarea.rect(0, 0, 4, 1))
+    let large = tuibuf.buffer_new(tuiarea.rect(0, 0, 8, 1))
+
+    test.case("the four new columns")
+    test.assert(list.len(tuibuf.diff(small_buf, large)) == 4)
+
+@test
+fn test_a_cell_that_went_blank_is_sent_as_a_space() [io]
+    // A blank has no glyph, and a terminal erases a cell by being
+    // written a space in it.
+    let filled = tuibuf.buffer_filled(tuiarea.rect(0, 0, 2, 1),
+                                      tuibuf.cell_of(0x41, sgr.attrs_default(), uni()))
+    let cleared = tuibuf.buffer_clear(filled)
+    let flush = tuibuf.patch_bytes([], tuibuf.diff(filled, cleared),
+                                   sgr.attrs_default())
+
+    test.case("the two spaces are the last two bytes")
+    let n = list.len(flush.bytes)
+    test.assert(list.get(flush.bytes, n - 1) == 0x20)
+    test.assert(list.get(flush.bytes, n - 2) == 0x20)
+
+@test
+fn test_every_widget_draws_nothing_into_an_empty_area() [io]
+    // A constraint there was no room for answers an empty rectangle,
+    // and a render loop hands it to the widget without a special case.
+    let none = tuiarea.rect_empty()
+    let b = blank()
+
+    test.case("the buffer comes back as it went in")
+    test.assert(list.len(tuiwidget.render_block(b, none, tuiwidget.default_block()).cells)
+                == 120)
+    test.assert(list.len(tuiwidget.render_paragraph(b, none,
+                                                    tuiwidget.default_paragraph("x"),
+                                                    uni()).cells) == 120)
+    test.assert(list.len(tuiwidget.render_list(b, none, tuiwidget.default_list(["x"]),
+                                               uni()).cells) == 120)
+    test.assert(list.len(tuiwidget.render_table(b, none,
+                                                tuiwidget.default_table([], []),
+                                                uni()).cells) == 120)
+    test.assert(list.len(tuiwidget.render_gauge(b, none, tuiwidget.default_gauge(0.5),
+                                                uni()).cells) == 120)
+    test.assert(list.len(tuiwidget.render_tabs(b, none, tuiwidget.default_tabs(["x"]),
+                                               uni()).cells) == 120)
+    test.assert(list.len(tuiwidget.render_scrollbar(b, none,
+                                                    tuiwidget.default_scrollbar(10, 2, 0)).cells)
+                == 120)
+
+@test
+fn test_a_block_without_a_border_costs_no_cell() [io]
+    // The block is then its background, its title and its footer.
+    var b = tuiwidget.default_block()
+    b.border = TuiNoBorder
+    b.title = "top"
+    b.footer = "bottom"
+    b.footer_align = TuiAlignEnd
+
+    test.case("the inside is the whole area")
+    let inner = tuiwidget.block_inner(b, area())
+    test.assert(inner.width == 20)
+    test.assert(inner.height == 6)
+
+    test.case("the title is in the first row")
+    let lines = tuibuf.buffer_text(tuiwidget.render_block(blank(), area(), b))
+    test.assert(str.starts_with(list.get(lines, 0), "top"))
+
+    test.case("and a footer aligned to the end sits at the right edge")
+    test.assert(str.ends_with(list.get(lines, 5), "bottom"))
+
+@test
+fn test_a_title_wider_than_the_block_is_cut_at_the_edge() [io]
+    // Rather than drawn past the border, which would corrupt whatever
+    // is beside it.
+    var b = tuiwidget.titled_block("a title far longer than this block is wide")
+    let lines = tuibuf.buffer_text(tuiwidget.render_block(blank(), area(), b))
+
+    test.case("every row is the buffer's width")
+    test.assert(list.len(str.chars(list.get(lines, 0))) == 20)
+
+    test.case("and nothing is drawn where there are no columns")
+    test.assert(list.len(tuiwidget.render_block(blank(), tuiarea.rect(0, 0, 1, 3),
+                                                b).cells) == 120)
+
+@test
+fn test_a_paragraph_that_clips_scrolls_sideways() [io]
+    // Which is what a log viewer does: the rows go on lining up, and
+    // the program moves the window along them.
+    var p = tuiwidget.default_paragraph("0123456789abcdefghij")
+    p.scroll_cols = 4
+
+    test.case("the first four columns are gone")
+    let lines = tuibuf.buffer_text(tuiwidget.render_paragraph(blank(), area(), p, uni()))
+    test.assert(str.starts_with(list.get(lines, 0), "4567"))
+
+    test.case("and a second line is a second row")
+    let two = tuiwidget.default_paragraph("one\ntwo")
+    test.assert(tuiwidget.paragraph_height(two, 20, uni()) == 2)
+    let drawn = tuibuf.buffer_text(tuiwidget.render_paragraph(blank(), area(), two,
+                                                              uni()))
+    test.assert(str.starts_with(list.get(drawn, 1), "two"))
+
+@test
+fn test_the_selected_item_takes_the_prefix_and_the_style() [io]
+    // The prefix is drawn as spaces before every other item, so the
+    // text lines up whichever is selected.
+    var l = tuiwidget.default_list(["one", "two", "three"])
+    l.selected = Some(1)
+    l.highlight_prefix = "> "
+    l.selected_style = sgr.apply_sgr_one(sgr.attrs_default(), 7)
+
+    let drawn = tuiwidget.render_list(blank(), area(), l, uni())
+    let lines = tuibuf.buffer_text(drawn)
+
+    test.case("the marked row")
+    test.assert(str.starts_with(list.get(lines, 1), "> two"))
+
+    test.case("and the unmarked rows are indented by the same width")
+    test.assert(str.starts_with(list.get(lines, 0), "  one"))
+
+    test.case("the selected row is the only one in its own style")
+    match tuibuf.buffer_get(drawn, 2, 1)
+        Some(c) => test.assert(c.style.inverse)
+        None    => test.assert(false)
+
+@test
+fn test_an_item_wider_than_the_list_is_cut() [io]
+    let l = tuiwidget.default_list(["a name far longer than twenty columns"])
+    let lines = tuibuf.buffer_text(tuiwidget.render_list(blank(), area(), l, uni()))
+
+    test.case("the row is the area's width")
+    test.assert(list.len(str.chars(list.get(lines, 0))) == 20)
+
+@test
+fn test_a_scroll_offset_answers_the_offset_it_was_given() [io]
+    var l = tuiwidget.default_list(["one", "two", "three", "four"])
+
+    test.case("an area of no rows cannot show anything, so nothing moves")
+    l.selected = Some(3)
+    l.offset = 1
+    test.assert(tuiwidget.list_offset_for(l, 0) == 1)
+
+    test.case("and a selection above the window scrolls up to it")
+    l.selected = Some(0)
+    l.offset = 2
+    test.assert(tuiwidget.list_offset_for(l, 2) == 0)
+
+@test
+fn test_a_click_above_the_list_names_nothing() [io]
+    let l = tuiwidget.default_list(["one"])
+
+    test.case("a row before the area")
+    match tuiwidget.list_item_at(l, tuiarea.rect(0, 2, 20, 4), 0)
+        Some(_) => test.assert(false)
+        None    => test.assert(true)
+
+@test
+fn test_a_table_without_a_header_starts_at_the_first_row() [io]
+    var t = tuiwidget.default_table([tuiwidget.table_row(["r1"]),
+                                     tuiwidget.table_row(["r2"])],
+                                    [TuiFill(1)])
+    t.selected = Some(0)
+    t.selected_style = sgr.apply_sgr_one(sgr.attrs_default(), 7)
+
+    let drawn = tuiwidget.render_table(blank(), area(), t, uni())
+    let lines = tuibuf.buffer_text(drawn)
+
+    test.case("the first row is a row rather than a header")
+    test.assert(str.starts_with(list.get(lines, 0), "r1"))
+
+    test.case("and the selected row is in its own style")
+    match tuibuf.buffer_get(drawn, 0, 0)
+        Some(c) => test.assert(c.style.inverse)
+        None    => test.assert(false)
+
+    test.case("a cell with no column is not drawn")
+    let narrow = tuiwidget.default_table([tuiwidget.table_row(["r1", "r2"])],
+                                         [TuiFixed(20), TuiFill(1)])
+    let cut = tuibuf.buffer_text(tuiwidget.render_table(blank(), area(), narrow, uni()))
+    test.assert(str.starts_with(list.get(cut, 0), "r1"))
+
+@test
+fn test_a_gauge_can_be_drawn_in_eighths_and_labelled() [io]
+    // The eighth-block characters give eight times the resolution and
+    // need a font that has them.
+    var g = tuiwidget.default_gauge(0.5)
+    g.unicode_blocks = true
+    g.label = Some("half")
+
+    let lines = tuibuf.buffer_text(tuiwidget.render_gauge(blank(), area(), g, uni()))
+
+    test.case("the label is drawn on the bar")
+    test.assert(str.contains(list.get(lines, 3), "half"))
+
+    test.case("and a ratio that does not land on a cell draws a partial block")
+    var part = tuiwidget.default_gauge(0.51)
+    part.unicode_blocks = true
+    let drawn = tuiwidget.render_gauge(blank(), area(), part, uni())
+    var blocks = 0
+    for x in list.range(20)
+        match tuibuf.buffer_get(drawn, x, 0)
+            Some(c) =>
+                if c.glyph >= 0x2589 and c.glyph <= 0x258F
+                    blocks = blocks + 1
+            None    => test.assert(false)
+    test.assert(blocks == 1)
+
+@test
+fn test_a_click_outside_the_tab_row_names_nothing() [io]
+    let t = tuiwidget.default_tabs(["alpha", "beta"])
+
+    test.case("a column before the row")
+    match tuiwidget.tab_at(t, tuiarea.rect(4, 0, 16, 1), 0, uni())
+        Some(_) => test.assert(false)
+        None    => test.assert(true)
+
+@test
+fn test_a_scrollbar_lies_along_either_axis() [io]
+    var s = tuiwidget.default_scrollbar(100, 10, 50)
+    s.orientation = TuiHorizontal
+    let bar = tuiarea.rect(0, 5, 20, 1)
+    let drawn = tuiwidget.render_scrollbar(blank(), bar, s)
+
+    test.case("the track runs across the row")
+    var track = 0
+    var thumb = 0
+    for x in list.range(20)
+        match tuibuf.buffer_get(drawn, x, 5)
+            Some(c) =>
+                if c.glyph == 0x2500
+                    track = track + 1
+                if c.glyph == 0x2588
+                    thumb = thumb + 1
+            None    => test.assert(false)
+    test.assert(track > 0)
+    test.assert(thumb == 2)
+
+    test.case("and a click along it names a content position")
+    match tuiwidget.scrollbar_position_at(s, bar, 19, 5)
+        Some(p) => test.assert(p == 90)
+        None    => test.assert(false)
+
+@test
+fn test_end_arrows_cost_two_cells_of_the_track() [io]
+    var s = tuiwidget.default_scrollbar(100, 10, 0)
+    s.show_ends = true
+    let bar = tuiarea.rect(19, 0, 1, 6)
+    let drawn = tuiwidget.render_scrollbar(blank(), bar, s)
+
+    test.case("an arrow at each end")
+    match tuibuf.buffer_get(drawn, 19, 0)
+        Some(c) => test.assert(c.glyph == 0x25B2)
+        None    => test.assert(false)
+    match tuibuf.buffer_get(drawn, 19, 5)
+        Some(c) => test.assert(c.glyph == 0x25BC)
+        None    => test.assert(false)
+
+    test.case("and a click is measured from the first cell of the track")
+    match tuiwidget.scrollbar_position_at(s, bar, 19, 1)
+        Some(p) => test.assert(p == 0)
+        None    => test.assert(false)
+    match tuiwidget.scrollbar_position_at(s, bar, 19, 4)
+        Some(p) => test.assert(p == 90)
+        None    => test.assert(false)
+
+    test.case("and the same on a horizontal bar")
+    var h = s
+    h.orientation = TuiHorizontal
+    let across = tuiwidget.render_scrollbar(blank(), tuiarea.rect(0, 0, 20, 1), h)
+    match tuibuf.buffer_get(across, 0, 0)
+        Some(c) => test.assert(c.glyph == 0x25C0)
+        None    => test.assert(false)
+    match tuibuf.buffer_get(across, 19, 0)
+        Some(c) => test.assert(c.glyph == 0x25B6)
+        None    => test.assert(false)
+
+@test
+fn test_a_bar_with_no_track_and_a_bar_of_one_cell() [io]
+    var ends = tuiwidget.default_scrollbar(100, 10, 0)
+    ends.show_ends = true
+
+    test.case("two arrows over two cells leave no track")
+    let none = tuiwidget.render_scrollbar(blank(), tuiarea.rect(19, 0, 1, 2), ends)
+    test.assert(list.len(none.cells) == 120)
+
+    test.case("a click on a bar of one cell is the top of the content")
+    let one = tuiwidget.default_scrollbar(100, 10, 40)
+    match tuiwidget.scrollbar_position_at(one, tuiarea.rect(19, 0, 1, 1), 19, 0)
+        Some(p) => test.assert(p == 0)
+        None    => test.assert(false)
+
+@test
+fn test_a_viewport_as_long_as_the_content_fills_the_track() [io]
+    // There is nowhere to scroll to, so the thumb is the whole bar and
+    // a click on it is the top.
+    let s = tuiwidget.default_scrollbar(4, 4, 0)
+    let bar = tuiarea.rect(19, 0, 1, 6)
+    let drawn = tuiwidget.render_scrollbar(blank(), bar, s)
+
+    test.case("every row is thumb")
+    var thumb = 0
+    for y in list.range(6)
+        match tuibuf.buffer_get(drawn, 19, y)
+            Some(c) =>
+                if c.glyph == 0x2588
+                    thumb = thumb + 1
+            None    => test.assert(false)
+    test.assert(thumb == 6)
+
+    test.case("and a click anywhere on it is position zero")
+    match tuiwidget.scrollbar_position_at(s, bar, 19, 3)
+        Some(p) => test.assert(p == 0)
+        None    => test.assert(false)
+
+@test
+fn test_the_other_border_sets_are_their_own_glyphs() [io]
+    // No program in the tree draws with them yet, and a program that
+    // does gets the same eight positions.
+    test.case("rounded corners with straight sides")
+    test.assert(tuiwidget.border_glyph(TuiRoundedBorder, TuiBorderTopLeft) == 0x256D)
+    test.assert(tuiwidget.border_glyph(TuiRoundedBorder, TuiBorderBottomRight) == 0x256F)
+
+    test.case("the double set")
+    test.assert(tuiwidget.border_glyph(TuiDoubleBorder, TuiBorderTop) == 0x2550)
+    test.assert(tuiwidget.border_glyph(TuiDoubleBorder, TuiBorderBottomLeft) == 0x255A)
+
+    test.case("the heavy set")
+    test.assert(tuiwidget.border_glyph(TuiThickBorder, TuiBorderRight) == 0x2503)
+    test.assert(tuiwidget.border_glyph(TuiThickBorder, TuiBorderTopRight) == 0x2513)
+
+    test.case("the half-block set, which is eight different characters")
+    test.assert(tuiwidget.border_glyph(TuiQuadrantBorder, TuiBorderTop) == 0x2580)
+    test.assert(tuiwidget.border_glyph(TuiQuadrantBorder, TuiBorderBottom) == 0x2584)
+    test.assert(tuiwidget.border_glyph(TuiQuadrantBorder, TuiBorderLeft) == 0x258C)
+    test.assert(tuiwidget.border_glyph(TuiQuadrantBorder, TuiBorderRight) == 0x2590)
+    test.assert(tuiwidget.border_glyph(TuiQuadrantBorder, TuiBorderTopLeft) == 0x259B)
+    test.assert(tuiwidget.border_glyph(TuiQuadrantBorder, TuiBorderTopRight) == 0x259C)
+    test.assert(tuiwidget.border_glyph(TuiQuadrantBorder, TuiBorderBottomLeft) == 0x2599)
+    test.assert(tuiwidget.border_glyph(TuiQuadrantBorder, TuiBorderBottomRight) == 0x259F)
+
+    test.case("and a block with no border has no glyphs")
+    test.assert(tuiwidget.border_glyph(TuiNoBorder, TuiBorderTop) == 0)
