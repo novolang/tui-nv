@@ -1,15 +1,12 @@
 // tuiarea_tests.nv — the API suite for the geometry and the
 // constraint solver.
 //
-// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
-// assertion here reaches `not implemented: tui-nv.tuiarea.<fn>`.  Run
-// with `--isolate` for one verdict per `@test`.
+// Run with `--isolate` for one verdict per `@test`.
 //
-// THE CASES THAT MATTER are the ones about the leftover cell.  A
+// The cases that matter are the ones about the leftover cell.  A
 // layout that does not add up to the rectangle it was given is a
-// layout whose screen shifts by one as a window is resized, and it is
-// the bug every hand-rolled terminal layout has — so almost every case
-// here asserts the total as well as the pieces.
+// layout whose screen shifts by one as a window is resized, so almost
+// every case here asserts the total as well as the pieces.
 
 use std.test
 use std.list

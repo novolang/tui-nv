@@ -1,11 +1,9 @@
 // tuibuf_tests.nv — the API suite for the cell buffer and the damage
 // model.
 //
-// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
-// assertion here reaches `not implemented: tui-nv.tuibuf.<fn>`.  Run
-// with `--isolate` for one verdict per `@test`.
+// Run with `--isolate` for one verdict per `@test`.
 //
-// THE CASE THAT MATTERS is `test_two_identical_buffers_diff_to_nothing`.
+// The case that matters is `test_two_identical_buffers_diff_to_nothing`.
 // The whole damage model rests on it: if an unchanged frame produced
 // patches, every frame would be a full redraw and the model would be a
 // slower way to do what it replaced.

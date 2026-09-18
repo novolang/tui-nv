@@ -9,12 +9,13 @@
 // stale, and a test can render the same value twice and get the same
 // cells.
 //
-// There is no `trait Widget`, and one would cost this package its
-// budget.  `dyn Trait` is charged the union of every impl in the
-// program (SPEC § 5.6), so one consumer with an effectful widget would
-// make the whole surface effectful.  A program that wants a list of
-// things to draw writes an enum of its own widgets and one match,
-// which is the same code with the cost where the program can see it.
+// There is no `trait Widget`, and one would make this package's
+// surface effectful.  `dyn Trait` is charged the union of every impl
+// in the program (SPEC § 5.6), so one consumer with a widget that
+// performs input or output would spend that on every function here.  A
+// program that wants a list of things to draw writes an enum of its
+// own widgets and one match, which is the same code with the cost
+// where the program can see it.
 //
 // The state a widget needs is on the value, and the program owns it.
 // A list's selection and scroll offset are fields of `TuiListView`

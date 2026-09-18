@@ -1,13 +1,10 @@
 // tuiwidget_tests.nv — the API suite for the widget set.
 //
-// RED ON PURPOSE: every body under `src/` is a `todo()`, so every
-// assertion here reaches `not implemented: tui-nv.tuiwidget.<fn>`.
 // Run with `--isolate` for one verdict per `@test`.
 //
-// EVERY CASE HERE RENDERS AND THEN READS THE BUFFER BACK, which is the
-// property the `core` layer buys: a widget is a pure function into a
-// cell buffer, so what it drew can be asserted with no terminal
-// anywhere and no escape sequence in sight.
+// Every case here renders and then reads the buffer back.  A widget is
+// a pure function into a cell buffer, so what it drew can be asserted
+// with no terminal anywhere and no escape sequence in sight.
 //
 // The cases about the hit-testing functions — `list_item_at`,
 // `tab_at`, `scrollbar_position_at` — are the ones a reader should

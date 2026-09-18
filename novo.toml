@@ -38,11 +38,13 @@ novo        = ">= 0.9.1"
 # `SgrAttrs`, so the style a diff hands to `seqwrite.sgr_change` needs
 # no conversion, and a second colour model here would mean translating
 # every changed cell at the boundary, in the one loop where the cost is
-# per cell.  `core`, so `dep-layer` holds.
+# per cell.  It performs no input or output, so it sits under a `core`
+# package.
 ansi-nv = "^0.1.0"
 
 # textwrap-nv, for the paragraph widget.  Wrapping at a display width
 # is the whole of what a paragraph does that a `buffer_set_str` does
 # not, and `wrapped_height` is what a layout asks before it decides how
-# tall to make one.  `core`, so `dep-layer` holds.
+# tall to make one.  It performs no input or output, so it sits under a
+# `core` package.
 textwrap-nv = "^0.1.0"
