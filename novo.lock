@@ -3,13 +3,20 @@
 [ansi-nv]
 source = "registry"
 url = "https://registry.novo-lang.org"
-req = "^0.0.1"
-version = "0.0.1"
-hash = "baa15b4cfde5aca61c11beeb110d62f4b8b9b0916c93f582301a8a0b43079817"
+req = "^0.1.0"
+version = "0.1.1"
+hash = "cd6b58a07bb5bdda67941173075a821804b19f58e1a3ac933df06adc72dc4aa0"
 
 [textwrap-nv]
 source = "registry"
 url = "https://registry.novo-lang.org"
-req = "^0.0.1"
-version = "0.0.1"
-hash = "42ec18b29d59808bf0f659f39daf4c09223d7da379276136900db8c4aa236a7b"
+req = "^0.1.0"
+version = "0.1.0"
+hash = "09ac3116dc2ff48639e506ac85b27a76756b004eb9053623a9f31c075728f35b"
+
+[unicode-nv]
+source = "registry"
+url = "https://registry.novo-lang.org"
+req = "^0.1.0"
+version = "0.1.0"
+hash = "d80f0bba85366266278e07d7c1c129296bc44e850f7491160225c9db1b96c0d3"
