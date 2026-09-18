@@ -1,31 +1,33 @@
 // tuiwidget.nv — the widgets a real program needs, each of them a pure
 // function from a value and an area into a buffer.
 //
-// Every body here is a `todo()`; the signatures are the design.
-//
-// A WIDGET IS A VALUE AND A FUNCTION, NOT AN OBJECT.  There is no
-// trait, no `render` method and no widget that holds a buffer: a
+// A widget is a value and a function rather than an object.  There is
+// no trait, no `render` method and no widget that holds a buffer: a
 // `TuiBlock` is what a block looks like, and `render_block` draws one.
 // That is ratatui's immediate-mode model, and it is what makes a frame
 // reproducible — nothing survives between frames, so nothing can be
 // stale, and a test can render the same value twice and get the same
 // cells.
 //
-// WHY NOT A TRAIT.  `trait Widget` with a `render` method would let a
-// program hold a heterogeneous list of them, and it would cost this
-// package its budget: `dyn Trait` is charged the union of every impl
-// in the program (SPEC § 5.6), so one consumer with an effectful
-// widget would make the whole surface effectful.  A program that wants
-// a list of things to draw writes an enum of its own widgets and one
-// match, which is the same code with the cost where the program can
-// see it.
+// There is no `trait Widget`, and one would cost this package its
+// budget.  `dyn Trait` is charged the union of every impl in the
+// program (SPEC § 5.6), so one consumer with an effectful widget would
+// make the whole surface effectful.  A program that wants a list of
+// things to draw writes an enum of its own widgets and one match,
+// which is the same code with the cost where the program can see it.
 //
-// THE STATE A WIDGET NEEDS IS ON THE VALUE, AND THE PROGRAM OWNS IT.
-// A list's selection and scroll offset are fields of `TuiListView`,
-// not something the widget remembers — so a program that has two lists
-// has two values, and a program that saves its session saves them.
-// `list_offset_for` is the one piece of scroll arithmetic worth
+// The state a widget needs is on the value, and the program owns it.
+// A list's selection and scroll offset are fields of `TuiListView`
+// rather than something the widget remembers, so a program that has
+// two lists has two values, and a program that saves its session saves
+// them.  `list_offset_for` is the one piece of scroll arithmetic worth
 // sharing, and it is a function rather than a hidden update.
+//
+// Every function that measures text takes a `widths.WrapWidth`, with
+// two exceptions.  `render_block` and `render_scrollbar` take none:
+// the first measures its title and its footer with textwrap-nv's
+// Unicode rule, and the second draws nothing but single-column
+// glyphs.
 
 use sgr
 use widths
@@ -56,9 +58,8 @@ pub enum TuiBorderKind
     TuiDoubleBorder
     // The heavy set.
     TuiThickBorder
-    // Half-block characters, which draw a border that sits between the
-    // cells rather than in them — the only kind that does not cost a
-    // whole cell of content on each side.
+    // Half-block characters, which draw a line along the outer edge of
+    // the cells it is drawn in rather than down their middle.
     TuiQuadrantBorder
     // ASCII: `+`, `-` and `|`.  For a terminal or a font that has no
     // box-drawing characters, which is still a real case over a serial
@@ -71,156 +72,243 @@ pub enum TuiBorderKind
 // constants a caller has to look up and a struct is four fields an
 // editor completes.
 pub struct TuiSides
-    top: Bool
-    bottom: Bool
-    left: Bool
-    right: Bool
+    var top: Bool
+    var bottom: Bool
+    var left: Bool
+    var right: Bool
 
 // TuiBlock is a bordered, titled region — the widget every other
 // widget is drawn inside.
 pub struct TuiBlock
-    border: TuiBorderKind
-    sides: TuiSides
+    var border: TuiBorderKind
+    var sides: TuiSides
     // Drawn into the top edge when there is one, and into the first
     // row when there is not.
-    title: Str
-    title_align: TuiAlign
+    var title: Str
+    var title_align: TuiAlign
     // Drawn into the bottom edge.  A separate field rather than a
     // second block, because a pane's title and its status line are one
     // widget in every program that has both.
-    footer: Str
-    footer_align: TuiAlign
+    var footer: Str
+    var footer_align: TuiAlign
     // The background of the whole block, border included.
-    style: sgr.SgrAttrs
+    var style: sgr.SgrAttrs
     // The border's own style, which is how a focused pane is
     // distinguished from an unfocused one.
-    border_style: sgr.SgrAttrs
-    title_style: sgr.SgrAttrs
+    var border_style: sgr.SgrAttrs
+    var title_style: sgr.SgrAttrs
 
 // TuiParagraph is wrapped or clipped text.
 pub struct TuiParagraph
-    text: Str
-    style: sgr.SgrAttrs
+    var text: Str
+    var style: sgr.SgrAttrs
     // `None` clips at the right edge instead of wrapping, which is
     // what a log line wants: wrapping a log makes the rows stop
     // lining up with anything.
-    wrap: ?wrapping.WrapOptions
-    align: TuiAlign
+    var wrap: ?wrapping.WrapOptions
+    var align: TuiAlign
     // How many wrapped lines to skip.  The program owns it, because
     // the program owns the scroll position.
-    scroll_rows: Int
+    var scroll_rows: Int
     // How many columns to skip, for the clipping case.
-    scroll_cols: Int
+    var scroll_cols: Int
 
 // TuiListView is a vertical list with an optional selection.
 pub struct TuiListView
-    items: [Str]
+    var items: [Str]
     // `None` for a list nothing is selected in.
-    selected: ?Int
+    var selected: ?Int
     // The index of the first item drawn.  A field rather than
     // something the widget computes, so that a program can scroll
     // without moving the selection — which is what a mouse wheel over
     // a list does.
-    offset: Int
-    style: sgr.SgrAttrs
-    selected_style: sgr.SgrAttrs
+    var offset: Int
+    var style: sgr.SgrAttrs
+    var selected_style: sgr.SgrAttrs
     // Drawn before the selected item and, as spaces, before every
     // other — so that the text lines up whichever is selected.
-    highlight_prefix: Str
+    var highlight_prefix: Str
 
 // TuiRow is one row of a table.
 pub struct TuiRow
-    cells: [Str]
-    style: sgr.SgrAttrs
+    var cells: [Str]
+    var style: sgr.SgrAttrs
 
 // TuiTableView is a table with sized columns and an optional
 // selection.
 pub struct TuiTableView
     // Drawn in `header_style` and never scrolled away.  Empty for a
     // table with no header.
-    header: [Str]
-    rows: [TuiRow]
+    var header: [Str]
+    var rows: [TuiRow]
     // One constraint per column, solved by `tuiarea.split` across the
     // table's width — so a column may be fixed, a percentage, or fill
     // whatever is left, with the same rules the screen layout uses.
-    widths: [tuiarea.TuiConstraint]
-    selected: ?Int
-    offset: Int
-    column_spacing: Int
-    style: sgr.SgrAttrs
-    header_style: sgr.SgrAttrs
-    selected_style: sgr.SgrAttrs
+    var widths: [tuiarea.TuiConstraint]
+    var selected: ?Int
+    var offset: Int
+    var column_spacing: Int
+    var style: sgr.SgrAttrs
+    var header_style: sgr.SgrAttrs
+    var selected_style: sgr.SgrAttrs
 
 // TuiGauge is a progress bar.
 pub struct TuiGauge
     // 0.0 to 1.0.  Outside that range is clamped, because a gauge that
     // drew past its area on a ratio of 1.2 is a gauge that corrupts
     // whatever is beside it.
-    ratio: Float
+    var ratio: Float
     // `None` draws the percentage; a `Some` replaces it.
-    label: ?Str
-    style: sgr.SgrAttrs
+    var label: ?Str
+    var style: sgr.SgrAttrs
     // The filled part's style.
-    gauge_style: sgr.SgrAttrs
+    var gauge_style: sgr.SgrAttrs
     // Use the eighth-block characters for a partly-filled cell, which
     // gives eight times the resolution and needs a font that has them.
-    unicode_blocks: Bool
+    var unicode_blocks: Bool
 
 // TuiTabs is a row of labels with one selected.
 pub struct TuiTabs
-    titles: [Str]
-    selected: Int
-    // Drawn between adjacent titles.
-    divider: Str
-    style: sgr.SgrAttrs
-    selected_style: sgr.SgrAttrs
+    var titles: [Str]
+    var selected: Int
+    // Drawn between adjacent titles, with one space on each side of
+    // it.
+    var divider: Str
+    var style: sgr.SgrAttrs
+    var selected_style: sgr.SgrAttrs
 
 // TuiScrollbar is the bar beside a scrollable region.
 pub struct TuiScrollbar
-    orientation: tuiarea.TuiDirection
+    var orientation: tuiarea.TuiDirection
     // How many items there are in total.
-    content_len: Int
+    var content_len: Int
     // How many are visible at once.  The thumb's length is this over
     // the total, which is the whole of what a scrollbar tells a
     // reader that a percentage does not.
-    viewport_len: Int
+    var viewport_len: Int
     // The index of the first visible item.
-    position: Int
-    thumb_style: sgr.SgrAttrs
-    track_style: sgr.SgrAttrs
+    var position: Int
+    var thumb_style: sgr.SgrAttrs
+    var track_style: sgr.SgrAttrs
     // Draw the ends as arrows, which costs two cells and tells a
     // reader the bar is a bar.
-    show_ends: Bool
+    var show_ends: Bool
+
+// The larger of two whole numbers.
+fn imax(a: Int, b: Int) -> Int
+    if a > b
+        a
+    else
+        b
+
+// The smaller of two whole numbers.
+fn imin(a: Int, b: Int) -> Int
+    if a < b
+        a
+    else
+        b
+
+// A whole number brought inside a range, low end first.
+fn iclamp(v: Int, low: Int, high: Int) -> Int
+    imin(imax(v, low), high)
+
+// The width rule the two render functions that take none measure
+// with: textwrap-nv's Unicode rule, which is UAX #11's East Asian
+// Width plus the zero-width marks.
+fn edge_width() -> widths.WrapWidth
+    widths.unicode_width()
+
+// The longest prefix of a string that fits in a column count.
+fn clip_to(text: Str, columns: Int, w: widths.WrapWidth) -> Str
+    if columns <= 0
+        ""
+    else if widths.str_width(w, text) <= columns
+        text
+    else
+        str.slice(text, 0, widths.fit_prefix(w, text, columns))
+
+// Where a run of `used` columns starts inside `width` columns.
+fn align_offset(a: TuiAlign, width: Int, used: Int) -> Int
+    match a
+        TuiAlignStart  => 0
+        TuiAlignMiddle => imax((width - used) / 2, 0)
+        TuiAlignEnd    => imax(width - used, 0)
+
+// A blank cell in a style, for a background.
+fn ground(style: sgr.SgrAttrs) -> tuibuf.TuiCell
+    TuiCell { glyph: 0, width: 1, style: style }
+
+// A one-column cell carrying a glyph in a style.
+fn glyph_cell(glyph: Int, style: sgr.SgrAttrs) -> tuibuf.TuiCell
+    TuiCell { glyph: glyph, width: 1, style: style }
+
+// Whether a block draws anything on an edge at all.
+fn draws_border(b: TuiBlock) -> Bool
+    match b.border
+        TuiNoBorder => false
+        _           => true
+
+// The cells a block gives up on one edge: one where it is drawn, none
+// otherwise.
+fn edge_cost(b: TuiBlock, drawn: Bool) -> Int
+    if draws_border(b) and drawn
+        1
+    else
+        0
 
 // all_sides is every edge drawn.
 pub fn all_sides() -> TuiSides
-    todo("tui-nv.tuiwidget.all_sides")
+    TuiSides { top: true, bottom: true, left: true, right: true }
 
 // no_sides is no edge drawn.
 pub fn no_sides() -> TuiSides
-    todo("tui-nv.tuiwidget.no_sides")
+    TuiSides { top: false, bottom: false, left: false, right: false }
 
 // default_block is a plain single-line border on all four sides, no
 // title, in the terminal's own colours.
 pub fn default_block() -> TuiBlock
-    todo("tui-nv.tuiwidget.default_block")
+    TuiBlock { border: TuiPlainBorder, sides: all_sides(), title: "",
+               title_align: TuiAlignStart, footer: "",
+               footer_align: TuiAlignStart, style: sgr.attrs_default(),
+               border_style: sgr.attrs_default(),
+               title_style: sgr.attrs_default() }
 
 // titled_block is `default_block` with a title.
 pub fn titled_block(title: Str) -> TuiBlock
-    todo("tui-nv.tuiwidget.titled_block")
+    var b = default_block()
+    b.title = title
+    b
 
 // block_inner is the area inside a block's borders.
 //
-// THE FUNCTION A LAYOUT CALLS BEFORE IT DRAWS ANYTHING ELSE.  A block
-// is drawn into an area, and everything inside it is drawn into this
-// — so a program's layout is `split`, then `block_inner`, then
-// `split` again.  It is a separate function from `render_block`
-// because the inner area is needed before the block is drawn as often
-// as after.
+// The function a layout calls before it draws anything else.  A block
+// is drawn into an area, and everything inside it is drawn into this —
+// so a program's layout is `split`, then `block_inner`, then `split`
+// again.  It is a separate function from `render_block` because the
+// inner area is needed before the block is drawn as often as after.
+//
+// ```novo
+// use tuiarea
+// use tuiwidget
+//
+// fn main() [io]
+//     let inner = tuiwidget.block_inner(tuiwidget.default_block(),
+//                                       tuiarea.rect(0, 0, 40, 10))
+//     println("${inner.width}")     // 38
+// ```
 pub fn block_inner(b: TuiBlock, area: tuiarea.TuiRect) -> tuiarea.TuiRect
-    todo("tui-nv.tuiwidget.block_inner")
+    let top = edge_cost(b, b.sides.top)
+    let bottom = edge_cost(b, b.sides.bottom)
+    let left = edge_cost(b, b.sides.left)
+    let right = edge_cost(b, b.sides.right)
+    tuiarea.rect(area.x + left, area.y + top,
+                 area.width - left - right, area.height - top - bottom)
 
 // render_block draws a block's border, title and background.
+//
+// The title goes in the top edge when one is drawn and in the first
+// row when none is.  The footer goes in the bottom edge the same way.
+// Both are clipped to the width between the vertical edges.
 //
 // ```novo
 // use tuiarea
@@ -234,55 +322,195 @@ pub fn block_inner(b: TuiBlock, area: tuiarea.TuiRect) -> tuiarea.TuiRect
 //     buf = tuiwidget.render_block(buf, area, block)
 //     // Everything else goes inside:
 //     let inner = tuiwidget.block_inner(block, area)
-//     println(str.from_int(inner.width))     // 38
+//     println("${inner.width}")     // 38
 // ```
 pub fn render_block(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, b: TuiBlock) -> tuibuf.TuiBuffer
-    todo("tui-nv.tuiwidget.render_block")
+    let r = tuiarea.rect_intersection(area, buf.area)
+    if tuiarea.rect_is_empty(r)
+        buf
+    else
+        var out = tuibuf.buffer_fill(buf, r, ground(b.style))
+        let top = edge_cost(b, b.sides.top)
+        let bottom = edge_cost(b, b.sides.bottom)
+        let left = edge_cost(b, b.sides.left)
+        let right = edge_cost(b, b.sides.right)
+        let run_w = imax(area.width - left - right, 0)
+        let run_h = imax(area.height - top - bottom, 0)
+        if top == 1
+            out = tuibuf.buffer_fill(out, tuiarea.rect(area.x + left, area.y, run_w, 1),
+                                     glyph_cell(border_glyph(b.border, TuiBorderTop),
+                                                b.border_style))
+        if bottom == 1
+            out = tuibuf.buffer_fill(out,
+                                     tuiarea.rect(area.x + left,
+                                                  tuiarea.rect_bottom(area) - 1, run_w, 1),
+                                     glyph_cell(border_glyph(b.border, TuiBorderBottom),
+                                                b.border_style))
+        if left == 1
+            out = tuibuf.buffer_fill(out, tuiarea.rect(area.x, area.y + top, 1, run_h),
+                                     glyph_cell(border_glyph(b.border, TuiBorderLeft),
+                                                b.border_style))
+        if right == 1
+            out = tuibuf.buffer_fill(out,
+                                     tuiarea.rect(tuiarea.rect_right(area) - 1,
+                                                  area.y + top, 1, run_h),
+                                     glyph_cell(border_glyph(b.border, TuiBorderRight),
+                                                b.border_style))
+        if top == 1 and left == 1
+            out = tuibuf.buffer_set(out, area.x, area.y,
+                                    glyph_cell(border_glyph(b.border, TuiBorderTopLeft),
+                                               b.border_style))
+        if top == 1 and right == 1
+            out = tuibuf.buffer_set(out, tuiarea.rect_right(area) - 1, area.y,
+                                    glyph_cell(border_glyph(b.border, TuiBorderTopRight),
+                                               b.border_style))
+        if bottom == 1 and left == 1
+            out = tuibuf.buffer_set(out, area.x, tuiarea.rect_bottom(area) - 1,
+                                    glyph_cell(border_glyph(b.border, TuiBorderBottomLeft),
+                                               b.border_style))
+        if bottom == 1 and right == 1
+            out = tuibuf.buffer_set(out, tuiarea.rect_right(area) - 1,
+                                    tuiarea.rect_bottom(area) - 1,
+                                    glyph_cell(border_glyph(b.border, TuiBorderBottomRight),
+                                               b.border_style))
+        if run_w > 0 and str.is_empty(b.title) == false
+            out = label_edge(out, b.title, b.title_align, area.x + left, area.y, run_w,
+                             b.title_style)
+        if run_w > 0 and str.is_empty(b.footer) == false
+            out = label_edge(out, b.footer, b.footer_align, area.x + left,
+                             tuiarea.rect_bottom(area) - 1, run_w, b.title_style)
+        out
+
+// One label written into an edge row, clipped and aligned.
+//
+// The caller decides whether there is a label to draw.  A branch here
+// that answered the buffer it was given unchanged strands it on this
+// toolchain, along with the arguments that branch does not read.
+fn label_edge(buf: tuibuf.TuiBuffer, text: Str, align: TuiAlign, x: Int, y: Int, width: Int,
+              style: sgr.SgrAttrs) -> tuibuf.TuiBuffer
+    let shown = clip_to(text, width, edge_width())
+    let at = x + align_offset(align, width, widths.str_width(edge_width(), shown))
+    tuibuf.buffer_set_str(buf, at, y, shown, style, edge_width()).buffer
 
 // default_paragraph is unwrapped, unscrolled, start-aligned text in
 // the terminal's own colours.
 pub fn default_paragraph(text: Str) -> TuiParagraph
-    todo("tui-nv.tuiwidget.default_paragraph")
+    TuiParagraph { text: text, style: sgr.attrs_default(), wrap: None,
+                   align: TuiAlignStart, scroll_rows: 0, scroll_cols: 0 }
+
+// The rows a paragraph draws at a width, before the scroll is applied.
+fn paragraph_rows(p: TuiParagraph, columns: Int, w: widths.WrapWidth) -> [Str]
+    match p.wrap
+        Some(opts) => wrapping.wrap(p.text, columns, w, opts)
+        None       => str.lines(p.text)
 
 // render_paragraph draws text into an area, wrapping it if the
 // paragraph says to and clipping it if not.
+//
+// `scroll_rows` skips that many rows of the answer and `scroll_cols`
+// skips that many columns of each row, so a program that scrolls a log
+// sideways changes one number.
 pub fn render_paragraph(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, p: TuiParagraph,
                         w: widths.WrapWidth) -> tuibuf.TuiBuffer
-    todo("tui-nv.tuiwidget.render_paragraph")
+    if tuiarea.rect_is_empty(area)
+        buf
+    else
+        let rows = paragraph_rows(p, area.width, w)
+        var out = buf
+        for r in 0..area.height
+            let i = imax(p.scroll_rows, 0) + r
+            if i < list.len(rows)
+                let whole = list.nth(rows, i) ?? ""
+                let cut = if p.scroll_cols > 0
+                    str.slice(whole, widths.fit_prefix(w, whole, p.scroll_cols),
+                              str.len(whole))
+                else
+                    whole
+                let shown = clip_to(cut, area.width, w)
+                let at = area.x + align_offset(p.align, area.width,
+                                               widths.str_width(w, shown))
+                out = tuibuf.buffer_set_str(out, at, area.y + r, shown, p.style, w).buffer
+        out
 
 // paragraph_height is how many rows a paragraph would take at a width.
 //
 // What a layout asks before it decides how tall to make one — a popup
-// sized to its message, a help pane that grows with its text — and it
-// is textwrap-nv's `wrapped_height` with the paragraph's own options
-// applied, so that the answer and the drawing cannot disagree.
+// sized to its message, a help pane that grows with its text.  A
+// paragraph that wraps is measured by textwrap-nv's `wrapped_height`
+// with the paragraph's own options applied, so that the answer and the
+// drawing cannot disagree.  A paragraph that clips is one row per
+// input line.  The scroll is not counted: this is the whole text's
+// height.
 pub fn paragraph_height(p: TuiParagraph, columns: Int, w: widths.WrapWidth) -> Int
-    todo("tui-nv.tuiwidget.paragraph_height")
+    match p.wrap
+        Some(opts) => wrapping.wrapped_height(p.text, columns, w, opts)
+        None       => list.len(str.lines(p.text))
 
 // default_list is a list with nothing selected, no scroll and no
 // highlight prefix.
 pub fn default_list(items: [Str]) -> TuiListView
-    todo("tui-nv.tuiwidget.default_list")
+    TuiListView { items: items, selected: None, offset: 0,
+                  style: sgr.attrs_default(), selected_style: sgr.attrs_default(),
+                  highlight_prefix: "" }
 
 // render_list draws a list, the selected item in its own style.
+//
+// The highlight prefix is drawn before the selected item and the same
+// width in spaces before every other, so that the text lines up
+// whichever item is selected.
 pub fn render_list(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, l: TuiListView,
                    w: widths.WrapWidth) -> tuibuf.TuiBuffer
-    todo("tui-nv.tuiwidget.render_list")
+    if tuiarea.rect_is_empty(area)
+        buf
+    else
+        let mark_w = widths.str_width(w, l.highlight_prefix)
+        let blanks = str.repeat(" ", mark_w)
+        var out = buf
+        for r in 0..area.height
+            let i = imax(l.offset, 0) + r
+            if i < list.len(l.items)
+                let chosen = match l.selected
+                    Some(s) => s == i
+                    None    => false
+                let style = if chosen
+                    l.selected_style
+                else
+                    l.style
+                let mark = if chosen
+                    l.highlight_prefix
+                else
+                    blanks
+                let row = area.y + r
+                let after = tuibuf.buffer_set_str(out, area.x, row, mark, style, w)
+                let text = clip_to(list.nth(l.items, i) ?? "", area.width - mark_w, w)
+                out = tuibuf.buffer_set_str(after.buffer, after.next_x, row, text,
+                                            style, w).buffer
+        out
 
 // list_offset_for is the scroll offset that keeps the selection
 // visible.
 //
-// A function the PROGRAM calls to update its own `offset` field,
+// A function the program calls to update its own `offset` field,
 // rather than something the widget does behind its back.  A widget
-// that silently scrolled would be a widget that disagrees with the
-// program about where the list is, which is how a selection ends up
-// half a screen from where the arrow keys think it is.
+// that silently scrolled would disagree with the program about where
+// the list is, which is how a selection ends up half a screen from
+// where the arrow keys think it is.
 //
 // It keeps the selection where it already is when it is already
 // visible, so that scrolling with the mouse and moving with the arrows
-// do not fight.
+// do not fight.  A list with nothing selected keeps the offset it has.
 pub fn list_offset_for(l: TuiListView, height: Int) -> Int
-    todo("tui-nv.tuiwidget.list_offset_for")
+    match l.selected
+        None    => l.offset
+        Some(s) =>
+            if height <= 0
+                l.offset
+            else if s < l.offset
+                imax(s, 0)
+            else if s >= l.offset + height
+                s - height + 1
+            else
+                l.offset
 
 // list_item_at is which item is at a row of the list's area, or `None`
 // for a row past the end.
@@ -291,16 +519,26 @@ pub fn list_offset_for(l: TuiListView, height: Int) -> Int
 // than the program's because it depends on the offset the widget drew
 // with.
 pub fn list_item_at(l: TuiListView, area: tuiarea.TuiRect, y: Int) -> ?Int
-    todo("tui-nv.tuiwidget.list_item_at")
+    if y < area.y or y >= tuiarea.rect_bottom(area)
+        None
+    else
+        let i = imax(l.offset, 0) + y - area.y
+        if i >= list.len(l.items)
+            None
+        else
+            Some(i)
 
 // default_table is a table with no header, no selection and no
 // spacing.
 pub fn default_table(rows: [TuiRow], widths: [tuiarea.TuiConstraint]) -> TuiTableView
-    todo("tui-nv.tuiwidget.default_table")
+    TuiTableView { header: [], rows: rows, widths: widths, selected: None, offset: 0,
+                   column_spacing: 0, style: sgr.attrs_default(),
+                   header_style: sgr.attrs_default(),
+                   selected_style: sgr.attrs_default() }
 
 // table_row is a row from its cells, in the terminal's own colours.
 pub fn table_row(cells: [Str]) -> TuiRow
-    todo("tui-nv.tuiwidget.table_row")
+    TuiRow { cells: cells, style: sgr.attrs_default() }
 
 // table_columns is where each column starts and how wide it is.
 //
@@ -309,73 +547,332 @@ pub fn table_row(cells: [Str]) -> TuiRow
 // separator between columns, or to know which column a click landed
 // in, needs the same answer the renderer used.
 pub fn table_columns(t: TuiTableView, area: tuiarea.TuiRect) -> [tuiarea.TuiRect]
-    todo("tui-nv.tuiwidget.table_columns")
+    tuiarea.split(area, TuiLayoutSpec { direction: TuiHorizontal,
+                                                margin: tuiarea.no_margin(),
+                                                spacing: imax(t.column_spacing, 0),
+                                                constraints: t.widths })
 
 // render_table draws a table: the header, then the rows from the
 // offset, each cell truncated to its column.
+//
+// The header takes the first row of the area and is never scrolled
+// away.  A row past the bottom of the area is not drawn.
 pub fn render_table(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, t: TuiTableView,
                     w: widths.WrapWidth) -> tuibuf.TuiBuffer
-    todo("tui-nv.tuiwidget.render_table")
+    if tuiarea.rect_is_empty(area)
+        buf
+    else
+        let cols = table_columns(t, area)
+        let has_header = list.is_empty(t.header) == false
+        var out = buf
+        if has_header
+            out = table_line(out, cols, t.header, area.y, t.header_style, w)
+        let first = if has_header
+            1
+        else
+            0
+        for r in first..area.height
+            let i = imax(t.offset, 0) + r - first
+            if i < list.len(t.rows)
+                let row = list.nth(t.rows, i) ?? table_row([])
+                let chosen = match t.selected
+                    Some(s) => s == i
+                    None    => false
+                let style = if chosen
+                    t.selected_style
+                else
+                    row.style
+                out = table_line(out, cols, row.cells, area.y + r, style, w)
+        out
+
+// One row of a table: every cell clipped to the column it sits in.
+fn table_line(buf: tuibuf.TuiBuffer, cols: [tuiarea.TuiRect], cells: [Str], y: Int,
+              style: sgr.SgrAttrs, w: widths.WrapWidth) -> tuibuf.TuiBuffer
+    var out = buf
+    for c in 0..imin(list.len(cols), list.len(cells))
+        let col = list.nth(cols, c) ?? tuiarea.rect_empty()
+        let text = clip_to(list.nth(cells, c) ?? "", col.width, w)
+        out = tuibuf.buffer_set_str(out, col.x, y, text, style, w).buffer
+    out
 
 // default_gauge is a gauge at a ratio, labelled with its percentage,
 // without the eighth-block characters.
 pub fn default_gauge(ratio: Float) -> TuiGauge
-    todo("tui-nv.tuiwidget.default_gauge")
+    TuiGauge { ratio: ratio, label: None, style: sgr.attrs_default(),
+               gauge_style: sgr.attrs_default(), unicode_blocks: false }
+
+// The eighth-block characters, from one eighth to seven eighths.
+//
+// U+2588 is the full block and the seven below it are the partial
+// widths, so an eighth of a cell is U+258F and seven eighths is
+// U+2589.
+fn eighth_glyph(eighths: Int) -> Int
+    0x2590 - iclamp(eighths, 1, 7)
 
 // render_gauge draws a progress bar with its label centred over it.
 //
-// The label is drawn ON the bar rather than beside it, and the cells
+// The label is drawn on the bar rather than beside it, and the cells
 // under the filled part take the gauge's style — which is what makes a
 // gauge readable at every ratio rather than only when the label
-// happens to be outside the fill.
+// happens to be outside the fill.  A ratio outside 0.0 to 1.0 is
+// clamped into it.
 pub fn render_gauge(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, g: TuiGauge,
                     w: widths.WrapWidth) -> tuibuf.TuiBuffer
-    todo("tui-nv.tuiwidget.render_gauge")
+    if tuiarea.rect_is_empty(area)
+        buf
+    else
+        let ratio = math.clamp(g.ratio, 0.0, 1.0)
+        let eighths = float.to_int(ratio * int.to_float(area.width) * 8.0)
+        let whole = iclamp(eighths / 8, 0, area.width)
+        let part = eighths % 8
+        var out = tuibuf.buffer_fill(buf, area, ground(g.style))
+        if g.unicode_blocks and part > 0 and whole < area.width
+            out = tuibuf.buffer_fill(out, tuiarea.rect(area.x + whole, area.y, 1,
+                                                       area.height),
+                                     glyph_cell(eighth_glyph(part), g.gauge_style))
+        let text = match g.label
+            Some(l) => l
+            None    => str.from_int(float.to_int(ratio * 100.0 + 0.5)) + "%"
+        let shown = clip_to(text, area.width, w)
+        let at = area.x + align_offset(TuiAlignMiddle, area.width,
+                                       widths.str_width(w, shown))
+        out = tuibuf.buffer_set_str(out, at, area.y + area.height / 2, shown,
+                                    g.style, w).buffer
+        tuibuf.buffer_style_region(out, tuiarea.rect(area.x, area.y, whole, area.height),
+                                   g.gauge_style)
 
 // default_tabs is a row of titles with the first selected and a
 // vertical bar between them.
 pub fn default_tabs(titles: [Str]) -> TuiTabs
-    todo("tui-nv.tuiwidget.default_tabs")
+    TuiTabs { titles: titles, selected: 0, divider: str.from_char(0x2502),
+              style: sgr.attrs_default(), selected_style: sgr.attrs_default() }
+
+// The column a tab starts at, relative to the row's own left edge.
+//
+// A tab takes its title's width, and the divider between two tabs
+// takes its own width plus a space on each side.
+fn tab_start(t: TuiTabs, index: Int, w: widths.WrapWidth) -> Int
+    let gap = widths.str_width(w, t.divider) + 2
+    var at = 0
+    for i in 0..iclamp(index, 0, list.len(t.titles))
+        at = at + widths.str_width(w, list.nth(t.titles, i) ?? "") + gap
+    at
 
 // render_tabs draws a row of labels, the selected one in its own
 // style.
+//
+// The divider is drawn between adjacent titles with one space on each
+// side of it, and the row is clipped at the right edge of the area.
 pub fn render_tabs(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, t: TuiTabs,
                    w: widths.WrapWidth) -> tuibuf.TuiBuffer
-    todo("tui-nv.tuiwidget.render_tabs")
+    if tuiarea.rect_is_empty(area)
+        buf
+    else
+        var out = tuibuf.buffer_fill(buf, tuiarea.rect(area.x, area.y, area.width, 1),
+                                     ground(t.style))
+        for i in 0..list.len(t.titles)
+            let at = area.x + tab_start(t, i, w)
+            let style = if i == t.selected
+                t.selected_style
+            else
+                t.style
+            let title = list.nth(t.titles, i) ?? ""
+            out = tuibuf.buffer_set_str(out, at, area.y, title, style, w).buffer
+            if i + 1 < list.len(t.titles)
+                let after = at + widths.str_width(w, title) + 1
+                out = tuibuf.buffer_set_str(out, after, area.y, t.divider, t.style,
+                                            w).buffer
+        out
 
 // tab_at is which tab is at a column of the tabs' area, or `None` for
 // a column that is between them or past the end.
+//
+// A column on the divider or on the space beside it belongs to no tab.
 pub fn tab_at(t: TuiTabs, area: tuiarea.TuiRect, x: Int, w: widths.WrapWidth) -> ?Int
-    todo("tui-nv.tuiwidget.tab_at")
+    if x < area.x or x >= tuiarea.rect_right(area)
+        None
+    else
+        let col = x - area.x
+        var found: ?Int = None
+        for i in 0..list.len(t.titles)
+            let at = tab_start(t, i, w)
+            let width = widths.str_width(w, list.nth(t.titles, i) ?? "")
+            if col >= at and col < at + width
+                found = Some(i)
+        found
 
 // default_scrollbar is a vertical bar with no end arrows.
 pub fn default_scrollbar(content_len: Int, viewport_len: Int, position: Int) -> TuiScrollbar
-    todo("tui-nv.tuiwidget.default_scrollbar")
+    TuiScrollbar { orientation: TuiVertical, content_len: content_len,
+                   viewport_len: viewport_len, position: position,
+                   thumb_style: sgr.attrs_default(), track_style: sgr.attrs_default(),
+                   show_ends: false }
+
+// How many cells of a bar's area the track itself occupies.
+fn track_len(s: TuiScrollbar, area: tuiarea.TuiRect) -> Int
+    let whole = match s.orientation
+        TuiHorizontal => area.width
+        TuiVertical   => area.height
+    if s.show_ends
+        imax(whole - 2, 0)
+    else
+        whole
+
+// How long the thumb is, never shorter than one cell.
+fn thumb_len(s: TuiScrollbar, track: Int) -> Int
+    if track <= 0
+        0
+    else if s.content_len <= 0 or s.viewport_len >= s.content_len
+        track
+    else
+        iclamp(track * s.viewport_len / s.content_len, 1, track)
+
+// Where the thumb starts along the track.
+fn thumb_start(s: TuiScrollbar, track: Int, len: Int) -> Int
+    let span = s.content_len - s.viewport_len
+    if span <= 0 or track <= len
+        0
+    else
+        iclamp(iclamp(s.position, 0, span) * (track - len) / span, 0, track - len)
 
 // render_scrollbar draws a track and a thumb.
 //
 // The thumb's length is the viewport over the content, with a minimum
 // of one cell — a scrollbar over ten thousand lines whose thumb
-// rounded to zero would be a track with nothing in it, which is the
-// bug every hand-rolled scrollbar has.
+// rounded to zero would be a track with nothing in it.  With
+// `show_ends` the first and last cell of the area are arrows and the
+// track is what is left between them.
 pub fn render_scrollbar(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect,
                         s: TuiScrollbar) -> tuibuf.TuiBuffer
-    todo("tui-nv.tuiwidget.render_scrollbar")
+    if tuiarea.rect_is_empty(area)
+        buf
+    else
+        let vertical = match s.orientation
+            TuiHorizontal => false
+            TuiVertical   => true
+        let track = track_len(s, area)
+        let len = thumb_len(s, track)
+        let start = thumb_start(s, track, len)
+        let lead = if s.show_ends
+            1
+        else
+            0
+        let track_glyph = if vertical
+            0x2502
+        else
+            0x2500
+        var out = tuibuf.buffer_fill(buf, bar_rect(area, vertical, lead, track),
+                                     glyph_cell(track_glyph, s.track_style))
+        out = tuibuf.buffer_fill(out, bar_rect(area, vertical, lead + start, len),
+                                 glyph_cell(0x2588, s.thumb_style))
+        if s.show_ends
+            let first = if vertical
+                0x25B2
+            else
+                0x25C0
+            let last = if vertical
+                0x25BC
+            else
+                0x25B6
+            out = tuibuf.buffer_fill(out, bar_rect(area, vertical, 0, 1),
+                                     glyph_cell(first, s.track_style))
+            let end = match s.orientation
+                TuiHorizontal => area.width - 1
+                TuiVertical   => area.height - 1
+            out = tuibuf.buffer_fill(out, bar_rect(area, vertical, end, 1),
+                                     glyph_cell(last, s.track_style))
+        out
+
+// A run of cells along a bar, from an offset into its area.
+fn bar_rect(area: tuiarea.TuiRect, vertical: Bool, at: Int, len: Int) -> tuiarea.TuiRect
+    if vertical
+        tuiarea.rect(area.x, area.y + at, area.width, len)
+    else
+        tuiarea.rect(area.x + at, area.y, len, area.height)
 
 // scrollbar_position_at is the content position a click on the bar
 // means, or `None` for a click outside it.
+//
+// The top of the track is the first item and the bottom is as far down
+// as the viewport allows, so the answer is never past
+// `content_len - viewport_len`.
 pub fn scrollbar_position_at(s: TuiScrollbar, area: tuiarea.TuiRect, x: Int, y: Int) -> ?Int
-    todo("tui-nv.tuiwidget.scrollbar_position_at")
+    if tuiarea.rect_contains(area, x, y) == false
+        None
+    else
+        let vertical = match s.orientation
+            TuiHorizontal => false
+            TuiVertical   => true
+        let along = if vertical
+            y - area.y
+        else
+            x - area.x
+        let track = track_len(s, area)
+        let lead = if s.show_ends
+            1
+        else
+            0
+        let span = imax(s.content_len - s.viewport_len, 0)
+        if track <= 1
+            Some(0)
+        else
+            Some(iclamp(iclamp(along - lead, 0, track - 1) * span / (track - 1), 0, span))
 
-// border_glyph is one of a border's characters — the eight of them,
-// by position.
+// border_glyph is one of a border's characters — the eight of them, by
+// position.
 //
 // Exposed because a program drawing its own divider between two panes
 // wants the same glyphs the blocks around them are drawn with, and
 // because the alternative is that it hard-codes a codepoint that does
-// not match `TuiAsciiBorder`.
+// not match `TuiAsciiBorder`.  `TuiNoBorder` answers 0 for every
+// position, which is the blank cell's glyph.
+//
+// ```novo
+// use tuiwidget
+//
+// fn main() [io]
+//     println("${tuiwidget.border_glyph(TuiAsciiBorder, TuiBorderTopLeft)}")   // 43
+// ```
 pub fn border_glyph(kind: TuiBorderKind, position: TuiBorderPart) -> Int
-    todo("tui-nv.tuiwidget.border_glyph")
+    match kind
+        TuiNoBorder       => 0
+        TuiPlainBorder    => line_glyph(position, 0x2500, 0x2502, 0x250C, 0x2510, 0x2514,
+                                        0x2518)
+        TuiRoundedBorder  => line_glyph(position, 0x2500, 0x2502, 0x256D, 0x256E, 0x2570,
+                                        0x256F)
+        TuiDoubleBorder   => line_glyph(position, 0x2550, 0x2551, 0x2554, 0x2557, 0x255A,
+                                        0x255D)
+        TuiThickBorder    => line_glyph(position, 0x2501, 0x2503, 0x250F, 0x2513, 0x2517,
+                                        0x251B)
+        TuiQuadrantBorder => quadrant_glyph(position)
+        TuiAsciiBorder    => line_glyph(position, 0x2D, 0x7C, 0x2B, 0x2B, 0x2B, 0x2B)
+
+// One glyph of a border drawn from a horizontal, a vertical and four
+// corners.
+fn line_glyph(position: TuiBorderPart, horizontal: Int, vertical: Int, tl: Int, tr: Int, bl: Int,
+              br: Int) -> Int
+    match position
+        TuiBorderTop         => horizontal
+        TuiBorderBottom      => horizontal
+        TuiBorderLeft        => vertical
+        TuiBorderRight       => vertical
+        TuiBorderTopLeft     => tl
+        TuiBorderTopRight    => tr
+        TuiBorderBottomLeft  => bl
+        TuiBorderBottomRight => br
+
+// One glyph of the half-block border, whose edges and corners are
+// eight different characters.
+fn quadrant_glyph(position: TuiBorderPart) -> Int
+    match position
+        TuiBorderTop         => 0x2580
+        TuiBorderBottom      => 0x2584
+        TuiBorderLeft        => 0x258C
+        TuiBorderRight       => 0x2590
+        TuiBorderTopLeft     => 0x259B
+        TuiBorderTopRight    => 0x259C
+        TuiBorderBottomLeft  => 0x2599
+        TuiBorderBottomRight => 0x259F
 
 // TuiBorderPart names one of the eight pieces a border is drawn from.
 pub enum TuiBorderPart

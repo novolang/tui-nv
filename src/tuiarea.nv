@@ -1,26 +1,24 @@
 // tuiarea.nv — rectangles, and the constraint solver that divides one.
 //
-// Every body here is a `todo()`; the signatures are the design.
-//
-// A LAYOUT IS ONE RECTANGLE BECOMING SEVERAL.  There is no tree here,
+// A layout is one rectangle becoming several.  There is no tree here,
 // no parent pointers and no widget that owns an area: `split` takes a
-// rectangle and a list of constraints and returns a rectangle per
+// rectangle and a list of constraints and answers a rectangle per
 // constraint, and a program builds a whole screen by calling it again
 // on the pieces.  That is ratatui's model, and it is the reason a
 // layout can be a pure function — nothing is retained between frames,
 // so nothing can be stale.
 //
-// THE COORDINATES ARE ZERO-BASED, and ansi-nv's are one-based.  The
+// The coordinates are zero-based, and ansi-nv's are one-based.  The
 // conversion happens once, where the caller turns a patch into a
 // cursor move, and it is written down in `tuibuf`'s header rather than
 // spread across two packages that each half-assume it.
 //
-// SIX CONSTRAINTS, AND THE ORDER THEY ARE SATISFIED IN IS THE WHOLE
-// BEHAVIOUR.  A solver that treated them as equals produces layouts
-// that jump by a cell when a window is resized, which is the bug every
-// hand-rolled terminal layout has.  `split`'s doc comment states the
-// order; it is a promise, not an implementation detail, because a
-// program's screen is built on top of it.
+// There are six constraints, and the order they are satisfied in is
+// the whole behaviour.  A solver that treated them as equals produces
+// layouts that jump by a cell when a window is resized.  `split`'s
+// comment states the order; it is a promise rather than an
+// implementation detail, because a program's screen is built on top of
+// it.
 
 // TuiRect is a rectangle of cells.
 //
@@ -30,10 +28,10 @@
 // exclusive edge is the choice that makes `rect_intersection` and the
 // splitter's arithmetic come out without an off-by-one anywhere.
 pub struct TuiRect
-    x: Int
-    y: Int
-    width: Int
-    height: Int
+    var x: Int
+    var y: Int
+    var width: Int
+    var height: Int
 
 // TuiMargin is how much of a rectangle to give away on each side.
 //
@@ -42,8 +40,8 @@ pub struct TuiRect
 // instead — and a four-field margin is four fields every caller fills
 // in with two values.
 pub struct TuiMargin
-    horizontal: Int
-    vertical: Int
+    var horizontal: Int
+    var vertical: Int
 
 // TuiDirection is which way a split runs.
 //
@@ -82,58 +80,99 @@ pub enum TuiConstraint
 // finished before it could be used is a builder a caller forgets to
 // finish, and because a layout that is a value can be a constant.
 pub struct TuiLayoutSpec
-    direction: TuiDirection
-    margin: TuiMargin
+    var direction: TuiDirection
+    var margin: TuiMargin
     // Cells left blank between adjacent pieces.  Counted against the
     // axis before the constraints are solved, so a spacing that does
     // not fit shrinks the pieces rather than overflowing the
     // rectangle.
-    spacing: Int
-    constraints: [TuiConstraint]
+    var spacing: Int
+    var constraints: [TuiConstraint]
+
+// The larger of two whole numbers.
+fn imax(a: Int, b: Int) -> Int
+    if a > b
+        a
+    else
+        b
+
+// The smaller of two whole numbers.
+fn imin(a: Int, b: Int) -> Int
+    if a < b
+        a
+    else
+        b
+
+// A whole number brought inside a range, low end first.
+fn iclamp(v: Int, low: Int, high: Int) -> Int
+    imin(imax(v, low), high)
+
+// The greatest common divisor of two non-negative whole numbers.
+//
+// The accumulator in `split` adds one fraction per ratio constraint,
+// and the denominators multiply.  Reducing each sum keeps the pair
+// small enough that the product with the axis length stays well inside
+// a machine word.
+fn gcd(a: Int, b: Int) -> Int
+    var x = imax(a, 0)
+    var y = imax(b, 0)
+    while y != 0
+        let t = x % y
+        x = y
+        y = t
+    imax(x, 1)
 
 // rect is a rectangle from its four numbers.
 //
 // A negative width or height is clamped to zero, so that every
 // rectangle this package produces is one an index loop can walk
 // without a guard.
+//
+// ```novo
+// use tuiarea
+//
+// fn main() [io]
+//     let r = tuiarea.rect(2, 3, 10, 5)
+//     println("${r.width}")     // 10
+// ```
 pub fn rect(x: Int, y: Int, width: Int, height: Int) -> TuiRect
-    todo("tui-nv.tuiarea.rect")
+    TuiRect { x: x, y: y, width: imax(width, 0), height: imax(height, 0) }
 
 // rect_empty is the zero rectangle at the origin.
 //
-// What a split returns for a constraint there was no room for, and
+// What a split answers for a constraint there was no room for, and
 // what a widget renders into when its area was squeezed to nothing —
 // which has to be a rectangle rather than an absent one, so that a
 // caller's render loop needs no special case.
 pub fn rect_empty() -> TuiRect
-    todo("tui-nv.tuiarea.rect_empty")
+    TuiRect { x: 0, y: 0, width: 0, height: 0 }
 
 // rect_right is the column one past the right edge.
 pub fn rect_right(r: TuiRect) -> Int
-    todo("tui-nv.tuiarea.rect_right")
+    r.x + r.width
 
 // rect_bottom is the row one past the bottom edge.
 pub fn rect_bottom(r: TuiRect) -> Int
-    todo("tui-nv.tuiarea.rect_bottom")
+    r.y + r.height
 
 // rect_area is how many cells a rectangle holds.
 pub fn rect_area(r: TuiRect) -> Int
-    todo("tui-nv.tuiarea.rect_area")
+    r.width * r.height
 
 // rect_is_empty says whether a rectangle holds no cells.
 pub fn rect_is_empty(r: TuiRect) -> Bool
-    todo("tui-nv.tuiarea.rect_is_empty")
+    r.width <= 0 or r.height <= 0
 
 // rect_contains says whether a cell is inside a rectangle.
 pub fn rect_contains(r: TuiRect, x: Int, y: Int) -> Bool
-    todo("tui-nv.tuiarea.rect_contains")
+    x >= r.x and x < rect_right(r) and y >= r.y and y < rect_bottom(r)
 
 // rect_intersects says whether two rectangles share a cell.
 //
 // The question a mouse click asks — which pane was that in — and the
 // reason a program does not need its own geometry.
 pub fn rect_intersects(a: TuiRect, b: TuiRect) -> Bool
-    todo("tui-nv.tuiarea.rect_intersects")
+    rect_is_empty(rect_intersection(a, b)) == false
 
 // rect_intersection is the rectangle two rectangles share, empty when
 // they share nothing.
@@ -143,15 +182,32 @@ pub fn rect_intersects(a: TuiRect, b: TuiRect) -> Bool
 // `tuiwidget` is written to clip through this rather than to trust its
 // own arithmetic.
 pub fn rect_intersection(a: TuiRect, b: TuiRect) -> TuiRect
-    todo("tui-nv.tuiarea.rect_intersection")
+    let x = imax(a.x, b.x)
+    let y = imax(a.y, b.y)
+    let right = imin(rect_right(a), rect_right(b))
+    let bottom = imin(rect_bottom(a), rect_bottom(b))
+    if right <= x or bottom <= y
+        rect_empty()
+    else
+        TuiRect { x: x, y: y, width: right - x, height: bottom - y }
 
 // rect_union is the smallest rectangle holding both.
 //
+// An empty rectangle holds no cells, so a union with one is the other.
 // For a caller accumulating a damage region of its own — the whole of
 // what changed, as one rectangle — which is a coarser answer than
 // `tuibuf.diff` and cheaper to act on when almost everything changed.
 pub fn rect_union(a: TuiRect, b: TuiRect) -> TuiRect
-    todo("tui-nv.tuiarea.rect_union")
+    if rect_is_empty(a)
+        b
+    else if rect_is_empty(b)
+        a
+    else
+        let x = imin(a.x, b.x)
+        let y = imin(a.y, b.y)
+        let right = imax(rect_right(a), rect_right(b))
+        let bottom = imax(rect_bottom(a), rect_bottom(b))
+        TuiRect { x: x, y: y, width: right - x, height: bottom - y }
 
 // rect_inner is a rectangle with a margin taken off every side.
 //
@@ -159,36 +215,96 @@ pub fn rect_union(a: TuiRect, b: TuiRect) -> TuiRect
 // the rectangle produces nothing to draw in instead of a rectangle
 // that wraps around.
 pub fn rect_inner(r: TuiRect, m: TuiMargin) -> TuiRect
-    todo("tui-nv.tuiarea.rect_inner")
+    let h = imax(m.horizontal, 0)
+    let v = imax(m.vertical, 0)
+    let width = r.width - 2 * h
+    let height = r.height - 2 * v
+    if width <= 0 or height <= 0
+        rect_empty()
+    else
+        TuiRect { x: r.x + h, y: r.y + v, width: width, height: height }
 
 // rect_clamp moves and shrinks a rectangle until it is inside another.
 //
 // For a popup that would hang off the edge of the screen, which is the
 // one case where the right answer is to move it rather than to clip
-// it.
+// it.  The size is reduced first, so the result is inside the bounds
+// even when it started larger than them.
 pub fn rect_clamp(r: TuiRect, bounds: TuiRect) -> TuiRect
-    todo("tui-nv.tuiarea.rect_clamp")
+    let width = imin(r.width, bounds.width)
+    let height = imin(r.height, bounds.height)
+    if width <= 0 or height <= 0
+        rect_empty()
+    else
+        let x = iclamp(r.x, bounds.x, rect_right(bounds) - width)
+        let y = iclamp(r.y, bounds.y, rect_bottom(bounds) - height)
+        TuiRect { x: x, y: y, width: width, height: height }
 
 // centred is a rectangle of the given size, centred inside another.
 //
 // A dialog, and the arithmetic every program writes once and gets
 // wrong on an odd number of columns.  It rounds towards the top left,
-// which is the convention every terminal program has converged on.
+// which is the convention every terminal program has converged on, so
+// an odd leftover column falls on the right.
+//
+// ```novo
+// use tuiarea
+//
+// fn main() [io]
+//     let c = tuiarea.centred(4, 2, tuiarea.rect(0, 0, 9, 5))
+//     println("${c.x}")     // 2
+// ```
 pub fn centred(width: Int, height: Int, bounds: TuiRect) -> TuiRect
-    todo("tui-nv.tuiarea.centred")
+    let w = iclamp(width, 0, bounds.width)
+    let h = iclamp(height, 0, bounds.height)
+    if w <= 0 or h <= 0
+        rect_empty()
+    else
+        TuiRect { x: bounds.x + (bounds.width - w) / 2,
+                  y: bounds.y + (bounds.height - h) / 2,
+                  width: w, height: h }
 
 // no_margin is a margin of zero on both axes.
 pub fn no_margin() -> TuiMargin
-    todo("tui-nv.tuiarea.no_margin")
+    TuiMargin { horizontal: 0, vertical: 0 }
 
 // layout is a spec from a direction and its constraints, with no
 // margin and no spacing.
 pub fn layout(direction: TuiDirection, constraints: [TuiConstraint]) -> TuiLayoutSpec
-    todo("tui-nv.tuiarea.layout")
+    TuiLayoutSpec { direction: direction, margin: no_margin(), spacing: 0,
+                    constraints: constraints }
+
+// How many cells of the axis a spec divides lie along it.
+fn axis_len(direction: TuiDirection, r: TuiRect) -> Int
+    match direction
+        TuiHorizontal => r.width
+        TuiVertical   => r.height
+
+// The margin a spec takes off each end of its own axis.
+fn axis_margin(direction: TuiDirection, m: TuiMargin) -> Int
+    match direction
+        TuiHorizontal => imax(m.horizontal, 0)
+        TuiVertical   => imax(m.vertical, 0)
+
+// A fill's weight, with a negative one read as zero.
+fn fill_weight(c: TuiConstraint) -> Int
+    match c
+        TuiFill(w) => imax(w, 0)
+        _          => 0
+
+// Whether a piece takes more than it asked for when cells are left.
+//
+// A fill does, and so does a minimum, which is a floor rather than a
+// size.  The rounding leftover goes to the last of them.
+fn can_grow(c: TuiConstraint) -> Bool
+    match c
+        TuiFill(_)    => true
+        TuiMinimum(_) => true
+        _             => false
 
 // split divides a rectangle, one piece per constraint.
 //
-// THE ORDER IS THE BEHAVIOUR, and it is a promise:
+// The order is the behaviour, and it is a promise:
 //
 //   1. the margin comes off, then the spacing between the pieces;
 //   2. `TuiFixed`, `TuiPercentage` and `TuiRatio` take what they asked
@@ -196,12 +312,17 @@ pub fn layout(direction: TuiDirection, constraints: [TuiConstraint]) -> TuiLayou
 //   3. `TuiMinimum` takes its minimum and `TuiMaximum` takes the
 //      lesser of its maximum and what is left;
 //   4. `TuiFill` shares whatever remains in proportion to the weights;
-//   5. any cell left over by the rounding goes to the LAST piece that
+//   5. any cell left over by the rounding goes to the last piece that
 //      can grow, so that the pieces always add up to the rectangle.
 //
-// Step 5 is the one that matters and the one every hand-rolled layout
-// gets wrong: without it a layout gains and loses a cell as a window
+// Step 5 is the one that matters and the one a hand-rolled layout
+// leaves out: without it a layout gains and loses a cell as a window
 // is resized, and the whole screen shifts by one.
+//
+// A run of `TuiRatio` constraints divides the axis exactly.  Each one
+// takes the cells between the running total before it and the running
+// total after it, so three thirds of a hundred columns are 33, 33 and
+// 34 rather than three 33s and a lost column.
 //
 // The result always has one rectangle per constraint, in the same
 // order — an empty one where there was no room — so a caller may index
@@ -216,10 +337,112 @@ pub fn layout(direction: TuiDirection, constraints: [TuiConstraint]) -> TuiLayou
 //         tuiarea.layout(TuiVertical, [TuiFixed(1), TuiFill(1), TuiFixed(1)]))
 //     // rows[0] is the title bar, rows[2] the status line, and
 //     // rows[1] is everything in between — 22 rows of it.
-//     println(str.from_int(list.get(rows, 1).height))
+//     println(str.from_int(list.get(rows, 1, tuiarea.rect_empty()).height))
 // ```
 pub fn split(area: TuiRect, spec: TuiLayoutSpec) -> [TuiRect]
-    todo("tui-nv.tuiarea.split")
+    let n = list.len(spec.constraints)
+    if n == 0
+        []
+    else
+        let inner = rect_inner(area, spec.margin)
+        let spacing = imax(spec.spacing, 0)
+        let along = imax(axis_len(spec.direction, inner) - spacing * (n - 1), 0)
+        let sizes = solve(spec.constraints, along)
+        place(spec.direction, inner, sizes, spacing)
+
+// The cells each constraint receives along an axis of `along` cells.
+//
+// The five steps of `split`'s promise, in order, over a list of
+// counts that starts at zero.
+fn solve(constraints: [TuiConstraint], along: Int) -> [Int]
+    let n = list.len(constraints)
+    var sizes = list.zeros(n)
+    var left = along
+
+    // Step 2.  A named size takes what it asked for, or what is left
+    // of the axis when that is less.  The ratios share one running
+    // total so that a run of them divides the axis exactly.
+    var acc_n = 0
+    var acc_d = 1
+    for i in 0..n
+        let c = list.get(constraints, i, TuiFill(0))
+        // A constraint whose size depends on what is left answers -1
+        // and is satisfied by the pass that suits it.
+        let want = match c
+            TuiFixed(cells)    => imax(cells, 0)
+            TuiPercentage(p)   => along * iclamp(p, 0, 100) / 100
+            TuiRatio(num, den) =>
+                if den <= 0 or num <= 0
+                    0
+                else
+                    let next_n = acc_n * den + imin(num, den) * acc_d
+                    let next_d = acc_d * den
+                    let g = gcd(next_n, next_d)
+                    let taken = along * next_n / next_d - along * acc_n / acc_d
+                    acc_n = next_n / g
+                    acc_d = next_d / g
+                    imax(taken, 0)
+            _                  => 0 - 1
+        if want >= 0
+            let take = imin(want, left)
+            sizes[i] = take
+            left = left - take
+
+    // Step 3.  A minimum takes its floor and a maximum takes the
+    // lesser of its ceiling and what is left.
+    for i in 0..n
+        let c = list.get(constraints, i, TuiFill(0))
+        let want = match c
+            TuiMinimum(cells) => imax(cells, 0)
+            TuiMaximum(cells) => imax(cells, 0)
+            _                 => 0 - 1
+        if want >= 0
+            let take = imin(want, left)
+            sizes[i] = take
+            left = left - take
+
+    // Step 4.  The fills share the remainder in proportion to their
+    // weights.
+    var weight = 0
+    for i in 0..n
+        weight = weight + fill_weight(list.get(constraints, i, TuiFill(0)))
+    if weight > 0 and left > 0
+        let share = left
+        var used = 0
+        for i in 0..n
+            let w = fill_weight(list.get(constraints, i, TuiFill(0)))
+            if w > 0
+                let take = share * w / weight
+                sizes[i] = sizes[i] + take
+                used = used + take
+        left = left - used
+
+    // Step 5.  The cells the rounding left over go to the last piece
+    // that can grow, so that the pieces add up to the axis.
+    if left > 0
+        var last = 0 - 1
+        for i in 0..n
+            if can_grow(list.get(constraints, i, TuiFill(0)))
+                last = i
+        if last >= 0
+            sizes[last] = sizes[last] + left
+    sizes
+
+// The rectangles a list of sizes covers, laid end to end along an
+// axis with the spacing between them.
+fn place(direction: TuiDirection, inner: TuiRect, sizes: [Int], spacing: Int) -> [TuiRect]
+    var out: [TuiRect] = []
+    var at = match direction
+        TuiHorizontal => inner.x
+        TuiVertical   => inner.y
+    for i in 0..list.len(sizes)
+        let size = list.get(sizes, i, 0)
+        let piece = match direction
+            TuiHorizontal => rect(at, inner.y, size, inner.height)
+            TuiVertical   => rect(inner.x, at, inner.width, size)
+        out = list.push(out, piece)
+        at = at + size + spacing
+    out
 
 // split_at divides a rectangle in two at a fixed offset along the
 // direction.
@@ -227,18 +450,34 @@ pub fn split(area: TuiRect, spec: TuiLayoutSpec) -> [TuiRect]
 // The one-line case, for a caller that wants a header off the top and
 // does not want to build a constraint list to say so.
 pub fn split_at(area: TuiRect, direction: TuiDirection, offset: Int) -> [TuiRect]
-    todo("tui-nv.tuiarea.split_at")
+    split(area, layout(direction, [TuiFixed(imax(offset, 0)), TuiFill(1)]))
 
 // constraint_min is the fewest cells a constraint can be satisfied
 // with.
 //
-// Exposed because a program that wants to refuse a window too small to
-// draw in — rather than draw something illegible — needs to add these
-// up before it splits anything.
+// A fixed size and a minimum name a floor; a percentage, a ratio, a
+// maximum and a fill are all satisfied by nothing.  Exposed because a
+// program that wants to refuse a window too small to draw in — rather
+// than draw something illegible — adds these up before it splits
+// anything.
 pub fn constraint_min(c: TuiConstraint) -> Int
-    todo("tui-nv.tuiarea.constraint_min")
+    match c
+        TuiFixed(cells)   => imax(cells, 0)
+        TuiMinimum(cells) => imax(cells, 0)
+        TuiPercentage(_)  => 0
+        TuiRatio(_, _)    => 0
+        TuiMaximum(_)     => 0
+        TuiFill(_)        => 0
 
 // spec_min is the fewest cells along the axis a whole spec needs,
 // margin and spacing included.
 pub fn spec_min(spec: TuiLayoutSpec) -> Int
-    todo("tui-nv.tuiarea.spec_min")
+    let n = list.len(spec.constraints)
+    var total = 0
+    for c in spec.constraints
+        total = total + constraint_min(c)
+    let gaps = if n > 1
+        imax(spec.spacing, 0) * (n - 1)
+    else
+        0
+    total + gaps + 2 * axis_margin(spec.direction, spec.margin)

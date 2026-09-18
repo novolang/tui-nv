@@ -213,7 +213,11 @@ fn test_a_gauge_clamps_a_ratio_outside_the_range() [io]
     test.assert(list.len(drawn.cells) == 120)
 
     test.case("and the default gauge labels itself with its percentage")
-    match tuiwidget.default_gauge(0.5).label
+    // The gauge is bound before the match: on this toolchain a field of
+    // a call's result read straight into a scrutinee strands the
+    // result.
+    let half = tuiwidget.default_gauge(0.5)
+    match half.label
         Some(_) => test.assert(false)
         None    => test.assert(true)
 

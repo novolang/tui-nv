@@ -114,8 +114,10 @@ fn test_a_style_change_alone_is_a_change() [io]
     // A cell whose glyph is the same and whose colour is not still has
     // to be redrawn, and a diff that only compared glyphs would leave
     // the old colour on the screen.
-    var bold = sgr.attrs_default()
-    bold.bold = true
+    // ansi-nv's `SgrAttrs` fields are not `var` and its per-field
+    // setters are private, so a style is built by applying the SGR
+    // code: 1 is bold and 7 is inverse.
+    let bold = sgr.apply_sgr_one(sgr.attrs_default(), 1)
 
     let before = tuibuf.buffer_filled(area(),
                                       tuibuf.cell_of(0x41, sgr.attrs_default(), mono()))
@@ -180,8 +182,7 @@ fn test_filling_and_clearing_are_inverses_over_a_blank() [io]
 fn test_styling_a_region_leaves_its_glyphs_alone() [io]
     // What a selection highlight is: the text is already drawn and only
     // the attributes change.
-    var inverse = sgr.attrs_default()
-    inverse.inverse = true
+    let inverse = sgr.apply_sgr_one(sgr.attrs_default(), 7)
 
     let text = tuibuf.buffer_fill(tuibuf.buffer_new(area()), area(),
                                   tuibuf.cell_of(0x41, sgr.attrs_default(), mono()))
@@ -272,8 +273,7 @@ fn test_the_damage_rectangle_covers_every_patch() [io]
 fn test_the_flush_reports_the_style_the_terminal_was_left_in() [io]
     // The half a caller forgets: the next frame has to start from it,
     // and there is no way to ask a terminal what state it is in.
-    var bold = sgr.attrs_default()
-    bold.bold = true
+    let bold = sgr.apply_sgr_one(sgr.attrs_default(), 1)
 
     let before = tuibuf.buffer_new(area())
     let after = tuibuf.buffer_set(before, 0, 0, tuibuf.cell_of(0x41, bold, mono()))
