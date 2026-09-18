@@ -13,12 +13,6 @@ style model and the escape sequences, and
 [textwrap-nv](https://novo-lang.org/packages/textwrap-nv) for wrapping a
 paragraph.
 
-**Status: NOT IMPLEMENTED — interface only.** Every function is declared
-with its full signature, but every body is a `todo()` that panics when
-called. The package is published so its design can be reviewed and
-depended on before it is implemented. Version 0.1.0 will be the first
-working release.
-
 ## What it is
 
 A terminal shows a rectangle of **cells**, each holding one character
@@ -87,62 +81,57 @@ novo pkg add tui-nv
 A whole frame: layout, render, diff, and the one write the program
 makes.
 
-```novo ignore
+```novo
 use sgr
 use widths
 use tuiarea
 use tuibuf
 use tuiwidget
 
+// One frame: a tab row, a bordered body with a list inside it, and
+// the rest of the screen below.
 fn frame(area: tuiarea.TuiRect, items: [Str], selected: Int) -> tuibuf.TuiBuffer
+    let w = widths.unicode_width()
+
     // One rectangle becomes three: a tab row, the body, a status line.
     let rows = tuiarea.split(area,
         tuiarea.layout(TuiVertical, [TuiFixed(1), TuiFill(1), TuiFixed(1)]))
 
     var buf = tuibuf.buffer_new(area)
     buf = tuiwidget.render_tabs(buf, list.get(rows, 0),
-                                tuiwidget.default_tabs(["files", "search"]),
-                                widths.monospace_width())
+                                tuiwidget.default_tabs(["files", "search"]), w)
 
     let block = tuiwidget.titled_block(" files ")
     let body = list.get(rows, 1)
     buf = tuiwidget.render_block(buf, body, block)
 
+    // Everything inside a block is drawn into the block's inner area.
+    let inner = tuiwidget.block_inner(block, body)
+
     var l = tuiwidget.default_list(items)
     l.selected = Some(selected)
     // The program updates its own scroll position; the widget does not.
-    l.offset = tuiwidget.list_offset_for(l, tuiwidget.block_inner(block, body).height)
-    tuiwidget.render_list(buf, tuiwidget.block_inner(block, body), l,
-                          widths.monospace_width())
+    l.offset = tuiwidget.list_offset_for(l, inner.height)
+    tuiwidget.render_list(buf, inner, l, w)
 
 fn main() [io]
     let area = tuiarea.rect(0, 0, 80, 24)
-    var previous = tuibuf.buffer_new(area)
-    var style = sgr.attrs_default()
 
-    loop
-        let current = frame(area, current_items(), current_selection())
-        // The cells that differ, in screen order.
-        let patches = tuibuf.diff(previous, current)
-        // The escape sequences for them, appended to an empty list.
-        let flush = tuibuf.patch_bytes([], patches, style)
+    // The frame the terminal is showing, and the one to show next.
+    let previous = tuibuf.buffer_new(area)
+    let current = frame(area, ["one", "two", "three"], 2)
 
-        // The program writes, once, so the update cannot tear.
-        write_bytes(flush.bytes)
+    // The cells that differ, in screen order.
+    let patches = tuibuf.diff(previous, current)
+    // The escape sequences for them, appended to an empty list.
+    let flush = tuibuf.patch_bytes([], patches, sgr.attrs_default())
 
-        previous = current
-        // The attributes the terminal was left in; the next frame
-        // starts from them.
-        style = flush.style
+    // The program writes `flush.bytes` in one call, so the update
+    // cannot tear, and starts the next frame from `flush.style`.
+    println(str.from_int(list.len(flush.bytes)) + " bytes")
 ```
 
-This program is marked `ignore` because it needs the bodies this
-release does not have: running it reaches a `todo()` and panics.
-
-Build and test with `novo pkg build` and `novo test`. Today `novo test`
-fails on purpose: every test reaches a
-`not implemented: tui-nv.<module>.<fn>` panic. The tests are the
-specification the implementation will have to satisfy.
+Build and test with `novo pkg build` and `novo test`.
 
 ## What the package contains
 
@@ -212,9 +201,13 @@ copies the screen.
    diff that did not know about it would report the second cell as
    changed every frame.
 8. **How many columns a character occupies is a parameter.** Every
-   function that measures text takes a `widths.WrapWidth`, because the
-   Unicode table that answers it is not written yet.
-   `widths.monospace_width()` measures every character as one column.
+   function that measures text takes a `widths.WrapWidth`.
+   `widths.unicode_width()` is UAX #11's East Asian Width with the
+   zero-width marks; `widths.monospace_width()` measures every character
+   as one column. `tuiwidget.render_block` and
+   `tuiwidget.render_scrollbar` take no rule: the first measures its
+   title and its footer with `widths.unicode_width()`, and the second
+   draws nothing but single-column glyphs.
 9. **The order `tuiarea.split` satisfies constraints in is a promise.**
    The margin comes off, then the spacing between pieces. `TuiFixed`,
    `TuiPercentage` and `TuiRatio` take what they asked for, in the order
@@ -222,39 +215,44 @@ copies the screen.
    minimum and `TuiMaximum` takes the lesser of its maximum and what is
    left. `TuiFill` shares the remainder in proportion to the weights.
    Any cell left over by the rounding goes to the last piece that can
-   grow.
+   grow, which is the last `TuiFill` or, where there is none, the last
+   `TuiMinimum`.
 10. **The last rule is the one that matters.** Without it a layout gains
     and loses a cell as the window is resized, and the whole screen
     shifts by one.
-11. **`split` always answers one rectangle per constraint, in the same
+11. **A run of `TuiRatio` constraints divides the axis exactly.** Each
+    one takes the cells between the running total before it and the
+    running total after it, so three thirds of a hundred columns are 33,
+    33 and 34.
+12. **`split` always answers one rectangle per constraint, in the same
     order.** A constraint there was no room for gets an empty rectangle
     rather than being left out, so a caller may index the answer against
     the list it passed in. `tuiarea.spec_min` says how many cells a
     whole layout needs, for a program that would rather refuse a window
     too small than draw something illegible.
-12. **The program owns a widget's state.** A list's selection and its
+13. **The program owns a widget's state.** A list's selection and its
     scroll offset are fields of `TuiListView`.
     `tuiwidget.list_offset_for` is a function the program calls to
     update its own field. A widget that scrolled by itself would
     disagree with the program about where the list is.
-13. **The hit tests come with the widgets.**
+14. **The hit tests come with the widgets.**
     `tuiwidget.list_item_at`, `tuiwidget.tab_at`,
     `tuiwidget.scrollbar_position_at` and `tuiwidget.table_columns` turn
     a position back into what is drawn there.
-14. **Drawing outside a buffer's area does nothing.**
+15. **Drawing outside a buffer's area does nothing.**
     `tuibuf.buffer_set` outside the area is silently ignored, and every
     widget clips through `tuiarea.rect_intersection`. A widget one cell
     too wide produces a slightly wrong picture rather than corrupting
     what is beside it or panicking.
-15. **A wide character that would straddle the right edge is left out
+16. **A wide character that would straddle the right edge is left out
     entirely** rather than half-drawn. `tuibuf.buffer_set_str` reports
     the column it stopped at, which is where the next styled run starts.
-16. **`tuibuf.buffer_resize` keeps the cells that are in both areas.**
+17. **`tuibuf.buffer_resize` keeps the cells that are in both areas.**
     That is what makes the frame after a resize a small diff rather than
     a whole screen.
-17. **A gauge's ratio is clamped to 0.0 and 1.0.** A gauge that drew
+18. **A gauge's ratio is clamped to 0.0 and 1.0.** A gauge that drew
     past its area on a ratio of 1.2 would corrupt what is beside it.
-18. **There is no trait for a widget, and none is planned.** A program
+19. **There is no trait for a widget, and none is planned.** A program
     that wants a mixed list of things to draw writes an enum of its own
     widgets and one `match`.
 
@@ -327,6 +325,7 @@ packing writes it over this.
 novo test --isolate tests/tuiarea_tests.nv    # 18 tests: geometry and the solver
 novo test --isolate tests/tuibuf_tests.nv     # 18 tests: the buffer and the damage model
 novo test --isolate tests/tuiwidget_tests.nv  # 19 tests: the widgets and the hit tests
+novo test --isolate tests/edges_tests.nv      # 27 tests: the answers at the edges
 ```
 
 `tuiarea_tests.nv` asserts the solver's promise: that the pieces always
@@ -351,20 +350,17 @@ keeps its selection visible without moving it, that a table's columns
 are solved the way the screen is, that a gauge clamps a ratio outside
 its range, and that a scrollbar's thumb is never shorter than one cell.
 
-No test needs a terminal. The tests compile today and fail at run, each
-on the `not implemented: tui-nv.<module>.<fn>` panic that is its body.
-That is the expected state of an interface release. They turn green one
-at a time as bodies land.
+`edges_tests.nv` asserts the answers at the edge of each promise: a
+layout with no constraints, a ratio with a denominator of zero, a
+rectangle clamped into bounds that hold nothing, a combining mark that
+takes no cell, a byte that begins no UTF-8 sequence, a buffer that grew,
+a cell that went blank, every widget handed an empty area, a title wider
+than its block, a scrollbar along either axis and with its end arrows
+drawn, and the four border sets no program in the tree draws with yet.
 
-## Implementation status
-
-Nothing is implemented. Every function below is a `todo()`.
-
-| Module | Public surface |
-| --- | --- |
-| `tuiarea` | `rect`, `rect_empty`, `rect_right`, `rect_bottom`, `rect_area`, `rect_is_empty`, `rect_contains`, `rect_intersects`, `rect_intersection`, `rect_union`, `rect_inner`, `rect_clamp`, `centred`, `no_margin`, `layout`, `split`, `split_at`, `constraint_min`, `spec_min` |
-| `tuibuf` | `blank_cell`, `cell_of`, `continuation_cell`, `cell_eq`, `buffer_new`, `buffer_filled`, `buffer_get`, `buffer_set`, `buffer_set_str`, `buffer_fill`, `buffer_clear`, `buffer_style_region`, `buffer_resize`, `buffer_merge`, `diff`, `diff_region`, `damage_rect`, `patch_bytes`, `buffer_bytes`, `buffer_text` |
-| `tuiwidget` | `all_sides`, `no_sides`, `default_block`, `titled_block`, `block_inner`, `render_block`, `default_paragraph`, `render_paragraph`, `paragraph_height`, `default_list`, `render_list`, `list_offset_for`, `list_item_at`, `default_table`, `table_row`, `table_columns`, `render_table`, `default_gauge`, `render_gauge`, `default_tabs`, `render_tabs`, `tab_at`, `default_scrollbar`, `render_scrollbar`, `scrollbar_position_at`, `border_glyph` |
+No test needs a terminal. Every line of `src/` is executed by the four
+suites; `bash tests/coverage.sh` merges the per-suite coverage and
+prints the number.
 
 ## Licence
 
