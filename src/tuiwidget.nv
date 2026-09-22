@@ -24,11 +24,12 @@
 // them.  `list_offset_for` is the one piece of scroll arithmetic worth
 // sharing, and it is a function rather than a hidden update.
 //
-// Every function that measures text takes a `widths.WrapWidth`, with
-// two exceptions.  `render_block` and `render_scrollbar` take none:
-// the first measures its title and its footer with textwrap-nv's
-// Unicode rule, and the second draws nothing but single-column
-// glyphs.
+// Every function that draws takes a `widths.WrapWidth`, textwrap-nv's
+// rule for the display width of one codepoint.  One rule measures a
+// whole frame, and no function here holds a rule of its own: a
+// caller that measures its paragraphs under one rule and its titles
+// under another draws a frame whose pieces disagree about where a
+// column is.
 
 use sgr
 use widths
@@ -213,12 +214,6 @@ fn imin(a: Int, b: Int) -> Int
 fn iclamp(v: Int, low: Int, high: Int) -> Int
     imin(imax(v, low), high)
 
-// The width rule the two render functions that take none measure
-// with: textwrap-nv's Unicode rule, which is UAX #11's East Asian
-// Width plus the zero-width marks.
-fn edge_width() -> widths.WrapWidth
-    widths.unicode_width()
-
 // The longest prefix of a string that fits in a column count.
 fn clip_to(text: Str, columns: Int, w: widths.WrapWidth) -> Str
     if columns <= 0
@@ -309,9 +304,15 @@ pub fn block_inner(b: TuiBlock, area: tuiarea.TuiRect) -> tuiarea.TuiRect
 //
 // The title goes in the top edge when one is drawn and in the first
 // row when none is.  The footer goes in the bottom edge the same way.
-// Both are clipped to the width between the vertical edges.
+// Both are measured under the width rule and clipped to the width
+// between the vertical edges.
+//
+// The border costs one cell on each side it is drawn on, whatever the
+// rule says about its glyphs, because that is the cost `block_inner`
+// answers with and a layout is built on it.
 //
 // ```novo
+// use widths
 // use tuiarea
 // use tuibuf
 // use tuiwidget
@@ -320,12 +321,13 @@ pub fn block_inner(b: TuiBlock, area: tuiarea.TuiRect) -> tuiarea.TuiRect
 //     let area = tuiarea.rect(0, 0, 40, 10)
 //     var buf = tuibuf.buffer_new(area)
 //     let block = tuiwidget.titled_block(" logs ")
-//     buf = tuiwidget.render_block(buf, area, block)
+//     buf = tuiwidget.render_block(buf, area, block, widths.unicode_width())
 //     // Everything else goes inside:
 //     let inner = tuiwidget.block_inner(block, area)
 //     println("${inner.width}")     // 38
 // ```
-pub fn render_block(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, b: TuiBlock) -> tuibuf.TuiBuffer
+pub fn render_block(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, b: TuiBlock,
+                    w: widths.WrapWidth) -> tuibuf.TuiBuffer
     let r = tuiarea.rect_intersection(area, buf.area)
     if tuiarea.rect_is_empty(r)
         buf
@@ -376,10 +378,10 @@ pub fn render_block(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, b: TuiBlock) -
                                                b.border_style))
         if run_w > 0 and str.is_empty(b.title) == false
             out = label_edge(out, b.title, b.title_align, area.x + left, area.y, run_w,
-                             b.title_style)
+                             b.title_style, w)
         if run_w > 0 and str.is_empty(b.footer) == false
             out = label_edge(out, b.footer, b.footer_align, area.x + left,
-                             tuiarea.rect_bottom(area) - 1, run_w, b.title_style)
+                             tuiarea.rect_bottom(area) - 1, run_w, b.title_style, w)
         out
 
 // One label written into an edge row, clipped and aligned.
@@ -388,10 +390,10 @@ pub fn render_block(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, b: TuiBlock) -
 // that answered the buffer it was given unchanged strands it on this
 // toolchain, along with the arguments that branch does not read.
 fn label_edge(buf: tuibuf.TuiBuffer, text: Str, align: TuiAlign, x: Int, y: Int, width: Int,
-              style: sgr.SgrAttrs) -> tuibuf.TuiBuffer
-    let shown = clip_to(text, width, edge_width())
-    let at = x + align_offset(align, width, widths.str_width(edge_width(), shown))
-    tuibuf.buffer_set_str(buf, at, y, shown, style, edge_width()).buffer
+              style: sgr.SgrAttrs, w: widths.WrapWidth) -> tuibuf.TuiBuffer
+    let shown = clip_to(text, width, w)
+    let at = x + align_offset(align, width, widths.str_width(w, shown))
+    tuibuf.buffer_set_str(buf, at, y, shown, style, w).buffer
 
 // default_paragraph is unwrapped, unscrolled, start-aligned text in
 // the terminal's own colours.
@@ -743,8 +745,28 @@ fn thumb_start(s: TuiScrollbar, track: Int, len: Int) -> Int
 // rounded to zero would be a track with nothing in it.  With
 // `show_ends` the first and last cell of the area are arrows and the
 // track is what is left between them.
-pub fn render_scrollbar(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect,
-                        s: TuiScrollbar) -> tuibuf.TuiBuffer
+//
+// The bar is drawn from box-drawing and geometric characters, which
+// UAX #11 gives the East Asian Width property Ambiguous: one column
+// on a terminal configured for Western text and two on one configured
+// for East Asian text.  The width rule is what says which, and a
+// glyph it does not give one column is left out.
+//
+// ```novo
+// use widths
+// use tuiarea
+// use tuibuf
+// use tuiwidget
+//
+// fn main() [io]
+//     let bar = tuiarea.rect(0, 0, 1, 10)
+//     let s = tuiwidget.default_scrollbar(100, 10, 0)
+//     let drawn = tuiwidget.render_scrollbar(tuibuf.buffer_new(bar), bar, s,
+//                                            widths.unicode_width())
+//     println("${list.len(drawn.cells)}")     // 10
+// ```
+pub fn render_scrollbar(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, s: TuiScrollbar,
+                        w: widths.WrapWidth) -> tuibuf.TuiBuffer
     if tuiarea.rect_is_empty(area)
         buf
     else
@@ -762,10 +784,10 @@ pub fn render_scrollbar(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect,
             0x2502
         else
             0x2500
-        var out = tuibuf.buffer_fill(buf, bar_rect(area, vertical, lead, track),
-                                     glyph_cell(track_glyph, s.track_style))
-        out = tuibuf.buffer_fill(out, bar_rect(area, vertical, lead + start, len),
-                                 glyph_cell(0x2588, s.thumb_style))
+        var out = bar_fill(buf, bar_rect(area, vertical, lead, track), track_glyph,
+                           s.track_style, w)
+        out = bar_fill(out, bar_rect(area, vertical, lead + start, len), 0x2588,
+                       s.thumb_style, w)
         if s.show_ends
             let first = if vertical
                 0x25B2
@@ -775,14 +797,28 @@ pub fn render_scrollbar(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect,
                 0x25BC
             else
                 0x25B6
-            out = tuibuf.buffer_fill(out, bar_rect(area, vertical, 0, 1),
-                                     glyph_cell(first, s.track_style))
+            out = bar_fill(out, bar_rect(area, vertical, 0, 1), first, s.track_style, w)
             let end = match s.orientation
                 TuiHorizontal => area.width - 1
                 TuiVertical   => area.height - 1
-            out = tuibuf.buffer_fill(out, bar_rect(area, vertical, end, 1),
-                                     glyph_cell(last, s.track_style))
+            out = bar_fill(out, bar_rect(area, vertical, end, 1), last, s.track_style, w)
         out
+
+// One run of a bar filled with a glyph, at the width the rule gives
+// it.
+//
+// A glyph the rule does not give one column is left out rather than
+// half-drawn.  A bar one column wide has no room for the continuation
+// cell a two-column glyph takes, and a terminal that advanced two
+// columns for it would shift every cell after it — the rule
+// `buffer_set_str` follows at the right edge of a buffer.
+fn bar_fill(buf: tuibuf.TuiBuffer, run: tuiarea.TuiRect, glyph: Int, style: sgr.SgrAttrs,
+            w: widths.WrapWidth) -> tuibuf.TuiBuffer
+    let c = tuibuf.cell_of(glyph, style, w)
+    if c.width == 1
+        tuibuf.buffer_fill(buf, run, c)
+    else
+        buf
 
 // A run of cells along a bar, from an offset into its area.
 fn bar_rect(area: tuiarea.TuiRect, vertical: Bool, at: Int, len: Int) -> tuiarea.TuiRect

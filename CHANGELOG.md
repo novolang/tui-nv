@@ -5,6 +5,71 @@ All notable changes to tui-nv are recorded here. The format is
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.2.0 — 2026-09-22
+
+A breaking release.  `render_block` and `render_scrollbar` take the
+caller's width rule, so every function that draws takes one and a frame
+is measured by a single rule throughout.  The dependency on ansi-nv
+moves to `^0.2.0`, whose parser is a `@value` struct over
+fixed-capacity buffers; nothing this package calls in `sgr` or
+`seqwrite` changed shape.
+
+- `render_block` measures its title and its footer under the rule it is
+  given.  It measured them under textwrap-nv's Unicode rule before,
+  whatever rule the rest of the frame used, so a caller drawing its
+  paragraphs under `widths.monospace_width()` and its titles under UAX
+  #11 disagreed with itself about where a column is.
+- `render_scrollbar` takes the widths of its glyphs from the rule.  The
+  box-drawing track, the full block and the four arrows have the East
+  Asian Width property Ambiguous in UAX #11: one column on a terminal
+  configured for Western text and two on one configured for East Asian
+  text.  A glyph the rule does not give one column is left out.  A bar
+  one column wide has no room for the continuation cell a two-column
+  glyph takes, and a terminal that advanced two columns for it would
+  shift every cell after it.
+- A block's border costs one cell on each side it is drawn on, whatever
+  the rule says about its glyphs.  That is the cost `block_inner`
+  answers with, and a layout is built on it.
+- `tests/edges_tests.nv` gains two cases: the same title placed by two
+  rules, and a bar under a rule that calls its glyphs two columns.  The
+  four suites are 84 tests, and every line under `src/` is executed by
+  them.
+- The toolchain floor moves to `>= 0.9.2`, the release the package was
+  built, tested and measured on.
+
+### Breaking
+
+- `render_block` takes a fourth argument, a `widths.WrapWidth`.
+- `render_scrollbar` takes a fourth argument, a `widths.WrapWidth`.
+- The dependency on ansi-nv is `^0.2.0`.  Under the pre-1.0 rule
+  `^0.1.0` does not admit `0.2.0`, so a program that names ansi-nv
+  itself moves its own constraint as well.  `AnsiParser` is a `@value`
+  struct in a new `vtcore` module there, `feed_byte` is gone, and the
+  chunk entry point is `drain`.  None of that surface is named here.
+
+### Migration
+
+| 0.1.0 | 0.2.0 |
+| --- | --- |
+| `render_block(buf, area, b)` | `render_block(buf, area, b, w)` |
+| `render_scrollbar(buf, area, s)` | `render_scrollbar(buf, area, s, w)` |
+| `ansi-nv = "^0.1.0"` | `ansi-nv = "^0.2.0"` |
+
+`w` is the `widths.WrapWidth` a caller already passes to
+`render_paragraph`, `render_list`, `render_table`, `render_gauge` and
+`render_tabs`.  A caller that holds none builds one once:
+`widths.unicode_width()` for a terminal, `widths.monospace_width()` for
+text that is entirely ASCII.  A caller that passed its own rule to the
+other widgets and relied on `render_block` measuring under UAX #11 keeps
+that by passing `widths.unicode_width()` here.
+
+### Known
+
+- **The dependency on ansi-nv is a path dependency in this tree** and
+  becomes `ansi-nv = "^0.2.0"` at publish, because ansi-nv 0.2.0 is not
+  on the registry yet.  A path dependency is refused by `novo pkg
+  publish`.
+
 ## 0.1.0 — 2026-09-18
 
 Layout, the cell buffer with its damage model, and the seven widgets,

@@ -103,7 +103,7 @@ fn frame(area: tuiarea.TuiRect, items: [Str], selected: Int) -> tuibuf.TuiBuffer
 
     let block = tuiwidget.titled_block(" files ")
     let body = list.get(rows, 1)
-    buf = tuiwidget.render_block(buf, body, block)
+    buf = tuiwidget.render_block(buf, body, block, w)
 
     // Everything inside a block is drawn into the block's inner area.
     let inner = tuiwidget.block_inner(block, body)
@@ -201,58 +201,67 @@ copies the screen.
    diff that did not know about it would report the second cell as
    changed every frame.
 8. **How many columns a character occupies is a parameter.** Every
-   function that measures text takes a `widths.WrapWidth`.
-   `widths.unicode_width()` is UAX #11's East Asian Width with the
-   zero-width marks; `widths.monospace_width()` measures every character
-   as one column. `tuiwidget.render_block` and
-   `tuiwidget.render_scrollbar` take no rule: the first measures its
-   title and its footer with `widths.unicode_width()`, and the second
-   draws nothing but single-column glyphs.
-9. **The order `tuiarea.split` satisfies constraints in is a promise.**
-   The margin comes off, then the spacing between pieces. `TuiFixed`,
-   `TuiPercentage` and `TuiRatio` take what they asked for, in the order
-   they were written, until the axis runs out. `TuiMinimum` takes its
-   minimum and `TuiMaximum` takes the lesser of its maximum and what is
-   left. `TuiFill` shares the remainder in proportion to the weights.
-   Any cell left over by the rounding goes to the last piece that can
-   grow, which is the last `TuiFill` or, where there is none, the last
-   `TuiMinimum`.
-10. **The last rule is the one that matters.** Without it a layout gains
+   function that draws takes a `widths.WrapWidth`, and one rule measures
+   a whole frame. `widths.unicode_width()` is UAX #11's East Asian Width
+   with the zero-width marks; `widths.monospace_width()` measures every
+   character as one column. A frame whose paragraphs are measured under
+   one rule and whose titles are measured under another disagrees with
+   itself about where a column is.
+9. **A scrollbar is drawn from characters UAX #11 calls Ambiguous.**
+   The box-drawing track, the full block and the four arrows are one
+   column on a terminal configured for Western text and two on one
+   configured for East Asian text. `tuiwidget.render_scrollbar` takes
+   the answer from the rule it is given, and leaves out a glyph the rule
+   does not give one column: a bar one column wide has no room for the
+   continuation cell a two-column glyph takes.
+10. **A block's border costs one cell on each side it is drawn on**,
+    whatever the rule says about its glyphs, because that is the cost
+    `tuiwidget.block_inner` answers with and a layout is built on it.
+11. **The order `tuiarea.split` satisfies constraints in is a promise.**
+    The margin comes off, then the spacing between pieces. `TuiFixed`,
+    `TuiPercentage` and `TuiRatio` take what they asked for, in the
+    order they were written, until the axis runs out. `TuiMinimum` takes
+    its minimum and `TuiMaximum` takes the lesser of its maximum and
+    what is left. `TuiFill` shares the remainder in proportion to the
+    weights. Any cell left over by the rounding goes to the last piece
+    that can grow, which is the last `TuiFill` or, where there is none,
+    the last `TuiMinimum`.
+12. **The last rule is the one that matters.** Without it a layout gains
     and loses a cell as the window is resized, and the whole screen
     shifts by one.
-11. **A run of `TuiRatio` constraints divides the axis exactly.** Each
+13. **A run of `TuiRatio` constraints divides the axis exactly.** Each
     one takes the cells between the running total before it and the
     running total after it, so three thirds of a hundred columns are 33,
     33 and 34.
-12. **`split` always answers one rectangle per constraint, in the same
+14. **`split` always answers one rectangle per constraint, in the same
     order.** A constraint there was no room for gets an empty rectangle
     rather than being left out, so a caller may index the answer against
     the list it passed in. `tuiarea.spec_min` says how many cells a
     whole layout needs, for a program that would rather refuse a window
     too small than draw something illegible.
-13. **The program owns a widget's state.** A list's selection and its
+15. **The program owns a widget's state.** A list's selection and its
     scroll offset are fields of `TuiListView`.
     `tuiwidget.list_offset_for` is a function the program calls to
     update its own field. A widget that scrolled by itself would
     disagree with the program about where the list is.
-14. **The hit tests come with the widgets.**
+16. **The hit tests come with the widgets.**
     `tuiwidget.list_item_at`, `tuiwidget.tab_at`,
     `tuiwidget.scrollbar_position_at` and `tuiwidget.table_columns` turn
     a position back into what is drawn there.
-15. **Drawing outside a buffer's area does nothing.**
+17. **Drawing outside a buffer's area does nothing.**
     `tuibuf.buffer_set` outside the area is silently ignored, and every
     widget clips through `tuiarea.rect_intersection`. A widget one cell
     too wide produces a slightly wrong picture rather than corrupting
     what is beside it or panicking.
-16. **A wide character that would straddle the right edge is left out
+18. **A wide character that would straddle the right edge is left out
     entirely** rather than half-drawn. `tuibuf.buffer_set_str` reports
     the column it stopped at, which is where the next styled run starts.
-17. **`tuibuf.buffer_resize` keeps the cells that are in both areas.**
+19. **`tuibuf.buffer_resize` keeps the cells that are in both areas.**
     That is what makes the frame after a resize a small diff rather than
     a whole screen.
-18. **A gauge's ratio is clamped to 0.0 and 1.0.** A gauge that drew
+20. **A gauge's ratio is clamped to 0.0 and 1.0.** A gauge that drew
     past its area on a ratio of 1.2 would corrupt what is beside it.
-19. **There is no trait for a widget, and none is planned.** A program
+21. **There is no trait for a widget, and none is planned.** A program
     that wants a mixed list of things to draw writes an enum of its own
     widgets and one `match`.
 
@@ -325,7 +334,7 @@ packing writes it over this.
 novo test --isolate tests/tuiarea_tests.nv    # 18 tests: geometry and the solver
 novo test --isolate tests/tuibuf_tests.nv     # 18 tests: the buffer and the damage model
 novo test --isolate tests/tuiwidget_tests.nv  # 19 tests: the widgets and the hit tests
-novo test --isolate tests/edges_tests.nv      # 27 tests: the answers at the edges
+novo test --isolate tests/edges_tests.nv      # 29 tests: the answers at the edges
 ```
 
 `tuiarea_tests.nv` asserts the solver's promise: that the pieces always
@@ -355,8 +364,10 @@ layout with no constraints, a ratio with a denominator of zero, a
 rectangle clamped into bounds that hold nothing, a combining mark that
 takes no cell, a byte that begins no UTF-8 sequence, a buffer that grew,
 a cell that went blank, every widget handed an empty area, a title wider
-than its block, a scrollbar along either axis and with its end arrows
-drawn, and the four border sets no program in the tree draws with yet.
+than its block, the same title measured under two width rules, a
+scrollbar along either axis and with its end arrows drawn, a scrollbar
+under a rule that calls its glyphs two columns, and the four border sets
+no program in the tree draws with yet.
 
 No test needs a terminal. Every line of `src/` is executed by the four
 suites; `bash tests/coverage.sh` merges the per-suite coverage and

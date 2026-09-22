@@ -1,6 +1,6 @@
 [package]
 name        = "tui-nv"
-version     = "0.1.0"
+version     = "0.2.0"
 description = "Layout, widgets and the damage model for a terminal user interface, with the writer belonging to the caller: a constraint solver over rectangles, a cell buffer, a diff of two buffers into the smallest set of changes, and the widgets a real program needs — block, paragraph, list, table, gauge, tabs, scrollbar.  Nothing here writes to a terminal."
 license     = "Apache-2.0"
 
@@ -22,10 +22,10 @@ category    = "terminal"
 tags        = ["tui", "terminal", "widgets", "layout", "ratatui", "damage", "diff", "cell-buffer", "sans-io"]
 repository  = "https://github.com/novolang/tui-nv"
 maintainers = ["novo-lang"]
-# Built, tested and measured on 0.9.1.  The floor is the toolchain the
+# Built, tested and measured on 0.9.2.  The floor is the toolchain the
 # release was checked against rather than the oldest one that might
 # work.
-novo        = ">= 0.9.1"
+novo        = ">= 0.9.2"
 
 # A library: no `main`, so `novo pkg build` type-checks and
 # effect-checks every module under `src/` and writes no binary.
@@ -40,7 +40,11 @@ novo        = ">= 0.9.1"
 # every changed cell at the boundary, in the one loop where the cost is
 # per cell.  It performs no input or output, so it sits under a `core`
 # package.
-ansi-nv = "^0.1.0"
+#
+# A path dependency in this tree, because ansi-nv 0.2.0 is not on the
+# registry yet.  `ansi-nv = "^0.2.0"` is the line that replaces this
+# one, and a path dependency is refused by `novo pkg publish`.
+ansi-nv = { path = "../ansi-nv" }
 
 # textwrap-nv, for the paragraph widget.  Wrapping at a display width
 # is the whole of what a paragraph does that a `buffer_set_str` does

@@ -62,7 +62,7 @@ fn test_a_block_with_no_sides_costs_nothing() [io]
 @test
 fn test_a_block_draws_its_border_and_its_title() [io]
     let b = tuiwidget.titled_block(" logs ")
-    let drawn = tuiwidget.render_block(blank(), area(), b)
+    let drawn = tuiwidget.render_block(blank(), area(), b, mono())
 
     test.case("the top left corner is drawn")
     match tuibuf.buffer_get(drawn, 0, 0)
@@ -251,7 +251,7 @@ fn test_a_scrollbars_thumb_is_never_shorter_than_a_cell() [io]
     // A scrollbar over ten thousand lines whose thumb rounded to zero
     // would be a track with nothing in it.
     let s = tuiwidget.default_scrollbar(10000, 6, 0)
-    let drawn = tuiwidget.render_scrollbar(blank(), tuiarea.rect(19, 0, 1, 6), s)
+    let drawn = tuiwidget.render_scrollbar(blank(), tuiarea.rect(19, 0, 1, 6), s, mono())
 
     test.case("something is drawn in the bar's column")
     var drawn_cells = 0

@@ -197,8 +197,8 @@ fn test_every_widget_draws_nothing_into_an_empty_area() [io]
     let b = blank()
 
     test.case("the buffer comes back as it went in")
-    test.assert(list.len(tuiwidget.render_block(b, none, tuiwidget.default_block()).cells)
-                == 120)
+    test.assert(list.len(tuiwidget.render_block(b, none, tuiwidget.default_block(),
+                                                uni()).cells) == 120)
     test.assert(list.len(tuiwidget.render_paragraph(b, none,
                                                     tuiwidget.default_paragraph("x"),
                                                     uni()).cells) == 120)
@@ -212,8 +212,8 @@ fn test_every_widget_draws_nothing_into_an_empty_area() [io]
     test.assert(list.len(tuiwidget.render_tabs(b, none, tuiwidget.default_tabs(["x"]),
                                                uni()).cells) == 120)
     test.assert(list.len(tuiwidget.render_scrollbar(b, none,
-                                                    tuiwidget.default_scrollbar(10, 2, 0)).cells)
-                == 120)
+                                                    tuiwidget.default_scrollbar(10, 2, 0),
+                                                    uni()).cells) == 120)
 
 @test
 fn test_a_block_without_a_border_costs_no_cell() [io]
@@ -230,7 +230,7 @@ fn test_a_block_without_a_border_costs_no_cell() [io]
     test.assert(inner.height == 6)
 
     test.case("the title is in the first row")
-    let lines = tuibuf.buffer_text(tuiwidget.render_block(blank(), area(), b))
+    let lines = tuibuf.buffer_text(tuiwidget.render_block(blank(), area(), b, uni()))
     test.assert(str.starts_with(list.get(lines, 0), "top"))
 
     test.case("and a footer aligned to the end sits at the right edge")
@@ -241,14 +241,14 @@ fn test_a_title_wider_than_the_block_is_cut_at_the_edge() [io]
     // Rather than drawn past the border, which would corrupt whatever
     // is beside it.
     var b = tuiwidget.titled_block("a title far longer than this block is wide")
-    let lines = tuibuf.buffer_text(tuiwidget.render_block(blank(), area(), b))
+    let lines = tuibuf.buffer_text(tuiwidget.render_block(blank(), area(), b, uni()))
 
     test.case("every row is the buffer's width")
     test.assert(list.len(str.chars(list.get(lines, 0))) == 20)
 
     test.case("and nothing is drawn where there are no columns")
-    test.assert(list.len(tuiwidget.render_block(blank(), tuiarea.rect(0, 0, 1, 3),
-                                                b).cells) == 120)
+    test.assert(list.len(tuiwidget.render_block(blank(), tuiarea.rect(0, 0, 1, 3), b,
+                                                uni()).cells) == 120)
 
 @test
 fn test_a_paragraph_that_clips_scrolls_sideways() [io]
@@ -387,7 +387,7 @@ fn test_a_scrollbar_lies_along_either_axis() [io]
     var s = tuiwidget.default_scrollbar(100, 10, 50)
     s.orientation = TuiHorizontal
     let bar = tuiarea.rect(0, 5, 20, 1)
-    let drawn = tuiwidget.render_scrollbar(blank(), bar, s)
+    let drawn = tuiwidget.render_scrollbar(blank(), bar, s, uni())
 
     test.case("the track runs across the row")
     var track = 0
@@ -413,7 +413,7 @@ fn test_end_arrows_cost_two_cells_of_the_track() [io]
     var s = tuiwidget.default_scrollbar(100, 10, 0)
     s.show_ends = true
     let bar = tuiarea.rect(19, 0, 1, 6)
-    let drawn = tuiwidget.render_scrollbar(blank(), bar, s)
+    let drawn = tuiwidget.render_scrollbar(blank(), bar, s, uni())
 
     test.case("an arrow at each end")
     match tuibuf.buffer_get(drawn, 19, 0)
@@ -434,7 +434,7 @@ fn test_end_arrows_cost_two_cells_of_the_track() [io]
     test.case("and the same on a horizontal bar")
     var h = s
     h.orientation = TuiHorizontal
-    let across = tuiwidget.render_scrollbar(blank(), tuiarea.rect(0, 0, 20, 1), h)
+    let across = tuiwidget.render_scrollbar(blank(), tuiarea.rect(0, 0, 20, 1), h, uni())
     match tuibuf.buffer_get(across, 0, 0)
         Some(c) => test.assert(c.glyph == 0x25C0)
         None    => test.assert(false)
@@ -448,7 +448,7 @@ fn test_a_bar_with_no_track_and_a_bar_of_one_cell() [io]
     ends.show_ends = true
 
     test.case("two arrows over two cells leave no track")
-    let none = tuiwidget.render_scrollbar(blank(), tuiarea.rect(19, 0, 1, 2), ends)
+    let none = tuiwidget.render_scrollbar(blank(), tuiarea.rect(19, 0, 1, 2), ends, uni())
     test.assert(list.len(none.cells) == 120)
 
     test.case("a click on a bar of one cell is the top of the content")
@@ -463,7 +463,7 @@ fn test_a_viewport_as_long_as_the_content_fills_the_track() [io]
     // a click on it is the top.
     let s = tuiwidget.default_scrollbar(4, 4, 0)
     let bar = tuiarea.rect(19, 0, 1, 6)
-    let drawn = tuiwidget.render_scrollbar(blank(), bar, s)
+    let drawn = tuiwidget.render_scrollbar(blank(), bar, s, uni())
 
     test.case("every row is thumb")
     var thumb = 0
@@ -508,3 +508,41 @@ fn test_the_other_border_sets_are_their_own_glyphs() [io]
 
     test.case("and a block with no border has no glyphs")
     test.assert(tuiwidget.border_glyph(TuiNoBorder, TuiBorderTop) == 0)
+
+@test
+fn test_a_blocks_title_is_measured_by_the_callers_rule() [io]
+    // The same title under two rules sits in two places.  Under UAX
+    // #11 an ideograph is two columns, so a title of three of them is
+    // six; under the rule that answers one for every codepoint it is
+    // three, and an end-aligned title starts three columns further
+    // right.
+    var b = tuiwidget.titled_block("日本語")
+    b.title_align = TuiAlignEnd
+
+    test.case("six columns for three ideographs")
+    let wide = tuiwidget.render_block(blank(), area(), b, uni())
+    match tuibuf.buffer_get(wide, 13, 0)
+        Some(c) => test.assert(c.glyph == 0x65E5)
+        None    => test.assert(false)
+
+    test.case("and three under the rule that gives every codepoint one")
+    let narrow = tuiwidget.render_block(blank(), area(), b, widths.monospace_width())
+    match tuibuf.buffer_get(narrow, 16, 0)
+        Some(c) => test.assert(c.glyph == 0x65E5)
+        None    => test.assert(false)
+
+@test
+fn test_a_bar_is_left_out_where_the_rule_calls_its_glyphs_wide() [io]
+    // A bar one column wide has no room for the continuation cell a
+    // two-column glyph takes, and a terminal that advanced two columns
+    // for it would shift every cell after it.
+    var s = tuiwidget.default_scrollbar(100, 10, 0)
+    s.show_ends = true
+    let bar = tuiarea.rect(19, 0, 1, 6)
+    let drawn = tuiwidget.render_scrollbar(blank(), bar, s, widths.fixed_width(2))
+
+    test.case("nothing is drawn in the bar's column")
+    for y in list.range(6)
+        match tuibuf.buffer_get(drawn, 19, y)
+            Some(c) => test.assert(c.glyph == 0)
+            None    => test.assert(false)
