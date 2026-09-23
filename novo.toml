@@ -34,17 +34,7 @@ novo        = ">= 0.9.2"
 "README.md" = "Layout, widgets and the damage model"
 
 [dependencies]
-# ansi-nv, for the style model and the writer.  A `TuiCell` carries an
-# `SgrAttrs`, so the style a diff hands to `seqwrite.sgr_change` needs
-# no conversion, and a second colour model here would mean translating
-# every changed cell at the boundary, in the one loop where the cost is
-# per cell.  It performs no input or output, so it sits under a `core`
-# package.
-#
-# A path dependency in this tree, because ansi-nv 0.2.0 is not on the
-# registry yet.  `ansi-nv = "^0.2.0"` is the line that replaces this
-# one, and a path dependency is refused by `novo pkg publish`.
-ansi-nv = { path = "../ansi-nv" }
+ansi-nv = "^0.2.0"
 
 # textwrap-nv, for the paragraph widget.  Wrapping at a display width
 # is the whole of what a paragraph does that a `buffer_set_str` does
