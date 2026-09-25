@@ -437,7 +437,7 @@ pub fn damage_rect(patches: [TuiPatch]) -> tuiarea.TuiRect
 //     // next frame starts from.
 //     println(str.from_int(list.len(flush.bytes)))
 // ```
-pub fn patch_bytes(out: [u8], patches: [TuiPatch], from: sgr.SgrAttrs) -> TuiFlush
+pub fn patch_bytes(var out: [u8], patches: [TuiPatch], from: sgr.SgrAttrs) -> TuiFlush
     var o = out
     var style = from
     // Where the terminal's cursor stands.  A row of -1 is "unknown",
@@ -467,7 +467,7 @@ pub fn patch_bytes(out: [u8], patches: [TuiPatch], from: sgr.SgrAttrs) -> TuiFlu
 // every cell, and having it as a function rather than as advice is
 // what stops a program from keeping a fake empty buffer around to diff
 // the first frame against.
-pub fn buffer_bytes(out: [u8], b: TuiBuffer, from: sgr.SgrAttrs) -> TuiFlush
+pub fn buffer_bytes(var out: [u8], b: TuiBuffer, from: sgr.SgrAttrs) -> TuiFlush
     patch_bytes(out, list.map(list.range(list.len(b.cells)), i => patch_of(b, i)), from)
 
 // The patch that redraws one cell of a buffer, by its index into the

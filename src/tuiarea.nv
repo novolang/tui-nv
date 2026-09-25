@@ -270,7 +270,11 @@ pub fn no_margin() -> TuiMargin
 
 // layout is a spec from a direction and its constraints, with no
 // margin and no spacing.
-pub fn layout(direction: TuiDirection, constraints: [TuiConstraint]) -> TuiLayoutSpec
+//
+// The spec holds `constraints` itself rather than a copy, and its
+// `constraints` field may be written, so the list comes from a `var`
+// name, a new list or a copy.
+pub fn layout(direction: TuiDirection, var constraints: [TuiConstraint]) -> TuiLayoutSpec
     TuiLayoutSpec { direction: direction, margin: no_margin(), spacing: 0,
                     constraints: constraints }
 

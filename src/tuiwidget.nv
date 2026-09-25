@@ -451,7 +451,12 @@ pub fn paragraph_height(p: TuiParagraph, columns: Int, w: widths.WrapWidth) -> I
 
 // default_list is a list with nothing selected, no scroll and no
 // highlight prefix.
-pub fn default_list(items: [Str]) -> TuiListView
+//
+// The view holds `items` itself rather than a copy, and its `items`
+// field may be written, so the list comes from a `var` name, a new
+// list or a copy.  The same holds for the lists the other widget
+// constructors take.
+pub fn default_list(var items: [Str]) -> TuiListView
     TuiListView { items: items, selected: None, offset: 0,
                   style: sgr.attrs_default(), selected_style: sgr.attrs_default(),
                   highlight_prefix: "" }
@@ -532,15 +537,17 @@ pub fn list_item_at(l: TuiListView, area: tuiarea.TuiRect, y: Int) -> ?Int
             Some(i)
 
 // default_table is a table with no header, no selection and no
-// spacing.
-pub fn default_table(rows: [TuiRow], widths: [tuiarea.TuiConstraint]) -> TuiTableView
+// spacing.  It holds `rows` and `widths` themselves, as `default_list`
+// holds its items.
+pub fn default_table(var rows: [TuiRow], var widths: [tuiarea.TuiConstraint]) -> TuiTableView
     TuiTableView { header: [], rows: rows, widths: widths, selected: None, offset: 0,
                    column_spacing: 0, style: sgr.attrs_default(),
                    header_style: sgr.attrs_default(),
                    selected_style: sgr.attrs_default() }
 
 // table_row is a row from its cells, in the terminal's own colours.
-pub fn table_row(cells: [Str]) -> TuiRow
+// The row holds `cells` itself, as `default_list` holds its items.
+pub fn table_row(var cells: [Str]) -> TuiRow
     TuiRow { cells: cells, style: sgr.attrs_default() }
 
 // table_columns is where each column starts and how wide it is.
@@ -549,11 +556,15 @@ pub fn table_row(cells: [Str]) -> TuiRow
 // constraints, exposed because a program that wants to draw a
 // separator between columns, or to know which column a click landed
 // in, needs the same answer the renderer used.
+//
+// The spec holds a copy of the column constraints.  A spec's
+// constraints are a list it may write into, and the table's own list
+// is not this function's to hand out for writing.
 pub fn table_columns(t: TuiTableView, area: tuiarea.TuiRect) -> [tuiarea.TuiRect]
     tuiarea.split(area, TuiLayoutSpec { direction: TuiHorizontal,
                                                 margin: tuiarea.no_margin(),
                                                 spacing: imax(t.column_spacing, 0),
-                                                constraints: t.widths })
+                                                constraints: list.clone(t.widths) })
 
 // render_table draws a table: the header, then the rows from the
 // offset, each cell truncated to its column.
@@ -645,8 +656,9 @@ pub fn render_gauge(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, g: TuiGauge,
                                    g.gauge_style)
 
 // default_tabs is a row of titles with the first selected and a
-// vertical bar between them.
-pub fn default_tabs(titles: [Str]) -> TuiTabs
+// vertical bar between them.  It holds `titles` itself, as
+// `default_list` holds its items.
+pub fn default_tabs(var titles: [Str]) -> TuiTabs
     TuiTabs { titles: titles, selected: 0, divider: str.from_char(0x2502),
               style: sgr.attrs_default(), selected_style: sgr.attrs_default() }
 

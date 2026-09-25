@@ -5,6 +5,23 @@ All notable changes to tui-nv are recorded here. The format is
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.2.2 — 2026-09-25
+
+The functions that keep or append to a caller's list declare it `var`.
+The next Novo release accepts a write into a list only through a name
+declared `var`, and it refuses to store a list held under `let` in a
+field that may be written.  A caller that passes a `var` list, a new
+list or a copy has nothing to change.  Every answer is unchanged.
+
+- `tuibuf.patch_bytes` and `tuibuf.buffer_bytes` append to the buffer
+  they are given.
+- `tuiarea.layout`, `tuiwidget.default_list`, `tuiwidget.default_table`,
+  `tuiwidget.table_row` and `tuiwidget.default_tabs` keep the list they
+  are given in a field that may be written.
+- `tuiwidget.table_columns` lays out a copy of the table's column
+  widths, so the table's own list is never handed out for writing.
+- The README's frame example takes its items as a `var` parameter.
+
 ## 0.2.1 — 2026-09-25
 
 The lock names ansi-nv 0.2.1, whose writers declare their buffer

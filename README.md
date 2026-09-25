@@ -89,8 +89,9 @@ use tuibuf
 use tuiwidget
 
 // One frame: a tab row, a bordered body with a list inside it, and
-// the rest of the screen below.
-fn frame(area: tuiarea.TuiRect, items: [Str], selected: Int) -> tuibuf.TuiBuffer
+// the rest of the screen below.  The list view holds `items` as a list
+// it may write into, so they arrive as a `var` parameter.
+fn frame(area: tuiarea.TuiRect, var items: [Str], selected: Int) -> tuibuf.TuiBuffer
     let w = widths.unicode_width()
 
     // One rectangle becomes three: a tab row, the body, a status line.
