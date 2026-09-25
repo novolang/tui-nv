@@ -5,6 +5,12 @@ All notable changes to tui-nv are recorded here. The format is
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.2.1 — 2026-09-25
+
+The lock names ansi-nv 0.2.1, whose writers declare their buffer
+parameter `var`, so this package builds on toolchain 0.10.0 as it does
+on 0.9.2.  No declaration of this package changed.
+
 ## 0.2.0 — 2026-09-22
 
 A breaking release.  `render_block` and `render_scrollbar` take the
