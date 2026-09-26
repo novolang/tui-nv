@@ -5,6 +5,12 @@ All notable changes to tui-nv are recorded here. The format is
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.2.3 — 2026-09-26
+
+- **The toolchain floor is 0.12.0**, raised from 0.9.2.
+  `tuiwidget.list_offset_for` takes the selection apart with
+  `let … else`, which 0.12.0 added. No signature and no answer changed.
+
 ## 0.2.2 — 2026-09-25
 
 The functions that keep or append to a caller's list declare it `var`.

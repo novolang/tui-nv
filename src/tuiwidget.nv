@@ -508,17 +508,15 @@ pub fn render_list(buf: tuibuf.TuiBuffer, area: tuiarea.TuiRect, l: TuiListView,
 // visible, so that scrolling with the mouse and moving with the arrows
 // do not fight.  A list with nothing selected keeps the offset it has.
 pub fn list_offset_for(l: TuiListView, height: Int) -> Int
-    match l.selected
-        None    => l.offset
-        Some(s) =>
-            if height <= 0
-                l.offset
-            else if s < l.offset
-                imax(s, 0)
-            else if s >= l.offset + height
-                s - height + 1
-            else
-                l.offset
+    let Some(s) = l.selected else return l.offset
+    if height <= 0
+        l.offset
+    else if s < l.offset
+        imax(s, 0)
+    else if s >= l.offset + height
+        s - height + 1
+    else
+        l.offset
 
 // list_item_at is which item is at a row of the list's area, or `None`
 // for a row past the end.

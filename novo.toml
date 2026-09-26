@@ -1,6 +1,6 @@
 [package]
 name        = "tui-nv"
-version     = "0.2.2"
+version     = "0.2.3"
 description = "Layout, widgets and the damage model for a terminal user interface, with the writer belonging to the caller: a constraint solver over rectangles, a cell buffer, a diff of two buffers into the smallest set of changes, and the widgets a real program needs — block, paragraph, list, table, gauge, tabs, scrollbar.  Nothing here writes to a terminal."
 license     = "Apache-2.0"
 
@@ -22,10 +22,9 @@ category    = "terminal"
 tags        = ["tui", "terminal", "widgets", "layout", "ratatui", "damage", "diff", "cell-buffer", "sans-io"]
 repository  = "https://github.com/novolang/tui-nv"
 maintainers = ["novo-lang"]
-# Built, tested and measured on 0.9.2.  The floor is the toolchain the
-# release was checked against rather than the oldest one that might
-# work.
-novo        = ">= 0.9.2"
+# `tuiwidget` takes an optional apart with `let … else`, which the
+# toolchain has from 0.12.0.
+novo        = ">= 0.12.0"
 
 # A library: no `main`, so `novo pkg build` type-checks and
 # effect-checks every module under `src/` and writes no binary.
