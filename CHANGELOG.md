@@ -5,6 +5,10 @@ All notable changes to tui-nv are recorded here. The format is
 package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 with the pre-1.0 rule that a breaking change bumps the MINOR number.
 
+## 0.2.4 — 2026-10-25
+
+A call that passes a variable to a `var` parameter now writes the `var` marker, which the 0.21.1 compiler asks for (E2050).  The package needs Novo 0.21.1 or later.  No signature and no behaviour changed.
+
 ## 0.2.3 — 2026-09-26
 
 - **The toolchain floor is 0.12.0**, raised from 0.9.2.

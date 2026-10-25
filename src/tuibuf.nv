@@ -448,14 +448,14 @@ pub fn patch_bytes(var out: [u8], patches: [TuiPatch], from: sgr.SgrAttrs) -> Tu
     for p in patches
         if p.cell.width > 0
             if p.x != at_x or p.y != at_y
-                o = seqwrite.cursor_to(o, p.y + 1, p.x + 1)
-            o = seqwrite.sgr_change(o, style, p.cell.style)
+                o = seqwrite.cursor_to(var o, p.y + 1, p.x + 1)
+            o = seqwrite.sgr_change(var o, style, p.cell.style)
             style = p.cell.style
             let glyph = if p.cell.glyph == 0
                 0x20
             else
                 p.cell.glyph
-            o = seqwrite.put_codepoint(o, glyph)
+            o = seqwrite.put_codepoint(var o, glyph)
             at_x = p.x + p.cell.width
             at_y = p.y
     TuiFlush { bytes: o, style: style }
@@ -468,7 +468,7 @@ pub fn patch_bytes(var out: [u8], patches: [TuiPatch], from: sgr.SgrAttrs) -> Tu
 // what stops a program from keeping a fake empty buffer around to diff
 // the first frame against.
 pub fn buffer_bytes(var out: [u8], b: TuiBuffer, from: sgr.SgrAttrs) -> TuiFlush
-    patch_bytes(out, list.map(list.range(list.len(b.cells)), i => patch_of(b, i)), from)
+    patch_bytes(var out, list.map(list.range(list.len(b.cells)), i => patch_of(b, i)), from)
 
 // The patch that redraws one cell of a buffer, by its index into the
 // flat cell list.
